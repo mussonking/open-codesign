@@ -3,12 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import {
-  isPreviewFileUrlAllowed,
-  isRuntimeConsoleNoise,
-  isRuntimeOptionalFontUrl,
-  runPreview,
-} from './preview-runtime';
+import { isPreviewFileUrlAllowed, isRuntimeConsoleNoise, runPreview } from './preview-runtime';
 
 // Puppeteer-core is a thin Chrome DevTools client — when no system Chrome is
 // discoverable (typical CI sandbox), the module itself still imports fine but
@@ -104,6 +99,12 @@ describe('runPreview path guards', () => {
           previewFile,
         ),
       ).toBe(false);
+      expect(
+        await isPreviewFileUrlAllowed('https://example.com/hero.png', tempDir, previewFile),
+      ).toBe(false);
+      expect(
+        await isPreviewFileUrlAllowed('data:image/png;base64,aW1n', tempDir, previewFile),
+      ).toBe(true);
     } finally {
       rmSync(outside, { recursive: true, force: true });
     }
@@ -148,41 +149,12 @@ describe('runPreview path guards', () => {
 });
 
 describe('runtime noise filtering', () => {
-  it('recognizes only the optional fonts injected by the JSX preview wrapper', () => {
-    expect(
-      isRuntimeOptionalFontUrl(
-        'https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300&display=swap',
-      ),
-    ).toBe(true);
-    expect(isRuntimeOptionalFontUrl('https://fonts.gstatic.com/s/dmsans/v16/example.woff2')).toBe(
-      true,
-    );
-    expect(isRuntimeOptionalFontUrl('https://example.com/assets/hero.png')).toBe(false);
-    expect(isRuntimeOptionalFontUrl('file:///tmp/workspace/assets/hero.png')).toBe(false);
-  });
-
-  it('filters optional runtime font console failures only when the wrapper is active', () => {
+  it('filters only known runtime console noise', () => {
     const message = 'Failed to load resource: net::ERR_NETWORK_CHANGED';
     const locationUrl =
       'https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300&display=swap';
-    expect(
-      isRuntimeConsoleNoise(message, {
-        ignoreOptionalRuntimeFontFailures: true,
-        locationUrl,
-      }),
-    ).toBe(true);
-    expect(
-      isRuntimeConsoleNoise(message, {
-        ignoreOptionalRuntimeFontFailures: false,
-        locationUrl,
-      }),
-    ).toBe(false);
-    expect(
-      isRuntimeConsoleNoise(message, {
-        ignoreOptionalRuntimeFontFailures: true,
-        locationUrl: 'https://example.com/assets/hero.png',
-      }),
-    ).toBe(false);
+    expect(isRuntimeConsoleNoise(message, { locationUrl })).toBe(false);
+    expect(isRuntimeConsoleNoise('You are using the in-browser Babel transformer.')).toBe(true);
   });
 });
 

@@ -138,6 +138,8 @@ describe('workspace file metadata/read helpers', () => {
     expect(classifyWorkspaceFileKind('notes.txt')).toBe('text');
     expect(classifyWorkspaceFileKind('data.json')).toBe('text');
     expect(classifyWorkspaceFileKind('assets/logo.png')).toBe('image');
+    expect(classifyWorkspaceFileKind('assets/fonts/demo.woff2')).toBe('font');
+    expect(classifyWorkspaceFileKind('assets/fonts/demo.ttf')).toBe('font');
     expect(classifyWorkspaceFileKind('demo.mp4')).toBe('video');
     expect(classifyWorkspaceFileKind('voice.wav')).toBe('audio');
     expect(classifyWorkspaceFileKind('brief.pdf')).toBe('pdf');

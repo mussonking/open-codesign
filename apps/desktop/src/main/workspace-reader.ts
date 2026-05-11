@@ -152,6 +152,7 @@ export type WorkspaceFileKind =
   | 'markdown'
   | 'text'
   | 'image'
+  | 'font'
   | 'video'
   | 'audio'
   | 'pdf'
@@ -237,6 +238,7 @@ const DOCUMENT_EXTENSIONS = new Set([
   '.xls',
   '.xlsx',
 ]);
+const FONT_EXTENSIONS = new Set(['.otf', '.ttf', '.woff', '.woff2']);
 
 export function isWorkspaceTextReadablePath(path: string): boolean {
   const lower = normalizeSlashes(path).toLowerCase();
@@ -281,6 +283,7 @@ export function classifyWorkspaceFileKind(path: string): WorkspaceFileKind {
   if (lower.endsWith('.md') || lower.endsWith('.markdown')) return 'markdown';
   if (lower.endsWith('.pdf')) return 'pdf';
   if (DOCUMENT_EXTENSIONS.has(ext)) return 'document';
+  if (FONT_EXTENSIONS.has(ext)) return 'font';
   if (
     lower.endsWith('.png') ||
     lower.endsWith('.jpg') ||

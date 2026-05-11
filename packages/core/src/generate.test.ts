@@ -165,7 +165,7 @@ describe('composeSystemPrompt()', () => {
     expect(prompt).not.toContain("window.addEventListener('message'");
   });
 
-  it('create mode never includes brand token values — trusted static content only', () => {
+  it('create mode never includes brand token values -- trusted static content only', () => {
     // composeSystemPrompt has no brandTokens parameter; this verifies the system
     // prompt contains only trusted static content regardless of what tokens exist.
     const prompt = composeSystemPrompt({ mode: 'create' });
@@ -182,7 +182,7 @@ describe('composeSystemPrompt()', () => {
     for (const guardrail of [
       'Section/content beats needed to avoid sparse output',
       'Palette, type ladder, candidate tweakable tokens',
-      'No hotlinked stock or placeholder images',
+      'No hotlinked fonts, images, SVGs, stylesheets, stock media, or placeholder images',
       'Content must be domain-specific',
       '#0E0E10',
       'default Tailwind grays',
@@ -219,11 +219,10 @@ describe('composeSystemPrompt()', () => {
     expect(prompt).not.toContain('iphone-16-pro-frame');
   });
 
-  it('create mode whitelists cdnjs.cloudflare.com for permitted JS libraries', () => {
+  it('create mode forbids CDN runtime dependencies and external API fetches', () => {
     const prompt = composeSystemPrompt({ mode: 'create' });
-    expect(prompt).toContain('cdnjs.cloudflare.com');
-    expect(prompt).toContain('exact-version URLs');
-    // Open hosts must be explicitly forbidden so the model does not use them.
+    expect(prompt).not.toContain('cdnjs.cloudflare.com');
+    expect(prompt).toContain('CDN runtime dependencies');
     expect(prompt).toContain('No arbitrary external scripts');
     expect(prompt).toContain('No external API fetches from artifacts');
   });

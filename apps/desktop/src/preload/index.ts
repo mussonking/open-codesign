@@ -68,6 +68,7 @@ export type WorkspaceFileKind =
   | 'markdown'
   | 'text'
   | 'image'
+  | 'font'
   | 'video'
   | 'audio'
   | 'pdf'
@@ -389,6 +390,20 @@ export interface AskRequest {
   requestId: string;
   sessionId: string;
   input: AskInput;
+}
+
+export type ExternalResourcePermissionScope = 'deny' | 'once' | 'always';
+export type ExternalResourceKind = 'font' | 'image' | 'svg' | 'other-asset';
+export interface ExternalResourcePermissionRequest {
+  requestId: string;
+  sessionId: string;
+  url: string;
+  origin: string;
+  kind: ExternalResourceKind;
+  destinationPath: string;
+  usage: string;
+  sourceName?: string | undefined;
+  licenseLabel?: string | undefined;
 }
 
 const api = {
@@ -907,6 +922,18 @@ const api = {
     },
     resolve: (requestId: string, result: AskResult) =>
       ipcRenderer.invoke('ask:resolve', { requestId, ...result }) as Promise<void>,
+  },
+  externalResourcePermission: {
+    onRequest: (cb: (req: ExternalResourcePermissionRequest) => void) => {
+      const listener = (_e: unknown, req: ExternalResourcePermissionRequest) => cb(req);
+      ipcRenderer.on('external-resource-permission:request', listener);
+      return () => ipcRenderer.removeListener('external-resource-permission:request', listener);
+    },
+    resolve: (requestId: string, scope: ExternalResourcePermissionScope) =>
+      ipcRenderer.invoke('external-resource-permission:resolve', {
+        requestId,
+        scope,
+      }) as Promise<void>,
   },
 };
 

@@ -1767,6 +1767,22 @@ describe('generateViaAgent()', () => {
           model: 'gpt-image-2',
           provider: 'openai',
         }),
+        importWebAsset: async () => ({
+          path: 'assets/logo.svg',
+          paths: ['assets/logo.svg'],
+          kind: 'svg',
+          sourceUrl: 'https://example.com/logo.svg',
+          mimeType: 'image/svg+xml',
+          bytes: 10,
+          files: [
+            {
+              path: 'assets/logo.svg',
+              sourceUrl: 'https://example.com/logo.svg',
+              mimeType: 'image/svg+xml',
+              bytes: 10,
+            },
+          ],
+        }),
       },
     );
     const tools = (agentCalls[0]?.options.initialState?.tools ?? []) as Array<{ name?: string }>;
@@ -1781,6 +1797,7 @@ describe('generateViaAgent()', () => {
       'done',
       'preview',
       'generate_image_asset',
+      'import_web_asset',
       'tweaks',
       'ask',
     ]);

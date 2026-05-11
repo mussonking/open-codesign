@@ -154,6 +154,7 @@ describe('FilesTabView preview helpers', () => {
     expect(isRenderableDesignFileKind('markdown')).toBe(false);
     expect(isRenderableDesignFileKind('text')).toBe(false);
     expect(isRenderableDesignFileKind('image')).toBe(false);
+    expect(isRenderableDesignFileKind('font')).toBe(false);
     expect(isRenderableDesignFileKind('video')).toBe(false);
     expect(isRenderableDesignFileKind('audio')).toBe(false);
     expect(isRenderableDesignFileKind('pdf')).toBe(false);
@@ -171,6 +172,7 @@ describe('FilesTabView preview helpers', () => {
     expect(previewKindForFile('data.json', 'text')).toBe('text');
     expect(previewKindForFile('style.css', 'css')).toBe('text');
     expect(previewKindForFile('assets/logo.png', 'image')).toBe('image');
+    expect(previewKindForFile('assets/fonts/demo.woff2', 'font')).toBe('unsupported');
     expect(previewKindForFile('clip.mp4', 'video')).toBe('video');
     expect(previewKindForFile('voice.mp3', 'audio')).toBe('audio');
     expect(previewKindForFile('brief.pdf', 'pdf')).toBe('pdf');

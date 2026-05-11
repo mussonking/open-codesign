@@ -14,6 +14,7 @@ import { registerDiagnosticsIpc } from './diagnostics-ipc';
 import { app, BrowserWindow, clipboard, dialog, shell } from './electron-runtime';
 import { ensureUserTemplates, resolveBundledTemplatesDir } from './ensure-user-templates';
 import { registerExporterIpc } from './exporter-ipc';
+import { registerExternalResourcePermissionIpc } from './external-resource-permission-ipc';
 import { registerImageGenerationSettingsIpc } from './image-generation-settings';
 import { maybeAbortIfRunningFromDmg } from './install-check';
 import { registerIpcHandlers } from './ipc/register';
@@ -266,6 +267,7 @@ if (!IS_VITEST) {
       registerExporterIpc(getMainWindow, diagnosticsDb);
       registerDiagnosticsIpc(diagnosticsDb);
       registerAskIpc();
+      registerExternalResourcePermissionIpc();
       if (IS_SMOKE_TEST) {
         bootLog.info('smoke.ok', { arch: process.arch, platform: process.platform });
         process.stdout.write(

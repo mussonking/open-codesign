@@ -13,9 +13,9 @@
 
 ## Resource limits
 
-- No arbitrary external scripts. The only allowed JS host is `cdnjs.cloudflare.com` with exact-version URLs.
+- No arbitrary external scripts or CDN runtime dependencies.
 - No external API fetches from artifacts. Inline the data needed for the mock.
-- No hotlinked stock or placeholder images. Use local assets, generated images, inline SVG, CSS, or data URIs.
+- No hotlinked fonts, images, SVGs, stylesheets, stock media, or placeholder images. Use local assets returned by tools, generated images, inline SVG, CSS, or data URIs.
 - Keep each generated file focused. If a design becomes too large, split supporting assets into workspace files rather than bloating chat.
 - Prefer separate files over overloading one giant source when the user asks for a reusable package, design document, slide content, implementation notes, asset inventory, or multi-screen system.
 

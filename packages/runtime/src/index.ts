@@ -347,10 +347,7 @@ function wrapJsxAsSrcdoc(
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-${baseTag(opts.baseHref)}<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;1,9..144,300;1,9..144,400&family=DM+Serif+Display:ital@0;1&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-<style>*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}html,body,#root{height:100%;}body{font-family:'DM Sans',system-ui,sans-serif;background:var(--color-artifact-bg, #ffffff);}</style>
+${baseTag(opts.baseHref)}<style>*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}html,body,#root{height:100%;}body{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:var(--color-artifact-bg, #ffffff);}</style>
 </head>
 <body>
 <div id="root"></div>
@@ -380,10 +377,7 @@ function wrapJsxAsStandaloneDocument(
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-${baseTag(opts.baseHref)}<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;1,9..144,300;1,9..144,400&family=DM+Serif+Display:ital@0;1&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-<style>*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}html,body,#root{height:100%;}body{font-family:'DM Sans',system-ui,sans-serif;background:var(--color-artifact-bg, #ffffff);}</style>
+${baseTag(opts.baseHref)}<style>*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}html,body,#root{height:100%;}body{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:var(--color-artifact-bg, #ffffff);}</style>
 </head>
 <body>
 <div id="root"></div>
@@ -403,8 +397,8 @@ function overlayScriptTag(): string {
 // HTML payloads authored by the agent occasionally mix a `<!doctype html>`
 // shell with Babel-transpiled JSX inside (`<script type="text/babel">`) or
 // references to the window-scoped component library (IOSDevice, DesignCanvas,
-// …). Without the React + Babel stack those references die silently and the
-// iframe renders blank — the model then misdiagnoses this as "Babel missing"
+// ...). Without the React + Babel stack those references die silently and the
+// iframe renders blank -- the model then misdiagnoses this as "Babel missing"
 // and rewrites everything in plain HTML. Detecting the mixed-mode case and
 // injecting the same runtime the JSX branch uses keeps both authoring styles
 // viable; pure HTML + CDN-library pages (Chart.js etc.) match no signal and

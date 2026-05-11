@@ -17,6 +17,7 @@
 import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
 import { DEFAULT_SOURCE_ENTRY, LEGACY_SOURCE_ENTRY, validateDesignMd } from '@open-codesign/shared';
 import { Type } from '@sinclair/typebox';
+import { findExternalResourceRefIssues } from './external-resource-refs.js';
 import type { TextEditorFsCallbacks } from './text-editor.js';
 
 const DoneParams = Type.Object({
@@ -75,6 +76,26 @@ function isUserDesignSourcePath(path: string): boolean {
   return isRenderableDesignSourcePath(normalized);
 }
 
+function isExternalResourceScannablePath(path: string): boolean {
+  const normalized = path.replace(/\\/g, '/').replace(/^\.\/+/, '');
+  const lower = normalized.toLowerCase();
+  if (
+    lower.startsWith('frames/') ||
+    lower.startsWith('skills/') ||
+    lower.startsWith('_starters/') ||
+    lower.startsWith('assets/')
+  ) {
+    return false;
+  }
+  return (
+    lower.endsWith('.jsx') ||
+    lower.endsWith('.tsx') ||
+    lower.endsWith('.html') ||
+    lower.endsWith('.htm') ||
+    lower.endsWith('.css')
+  );
+}
+
 function validateDesignMdContent(content: string): DoneError[] {
   return validateDesignMd(content)
     .filter((finding) => finding.severity === 'error')
@@ -116,6 +137,23 @@ function requiredDesignMdErrors(fs: TextEditorFsCallbacks, activePath: string): 
       source: DESIGN_MD_ENTRY,
     },
   ];
+}
+
+function externalResourceWorkspaceErrors(
+  fs: TextEditorFsCallbacks,
+  activePath: string,
+): DoneError[] {
+  const candidates = new Set(
+    fs.listDir('.').filter((path) => isExternalResourceScannablePath(path)),
+  );
+  if (isExternalResourceScannablePath(activePath)) candidates.add(activePath);
+  const errors: DoneError[] = [];
+  for (const path of candidates) {
+    const file = fs.view(path);
+    if (file === null) continue;
+    errors.push(...findExternalResourceRefIssues(file.content, path));
+  }
+  return errors;
 }
 
 /** Host-injected runtime verifier. Receives the raw artifact source (the
@@ -503,6 +541,7 @@ export function makeDoneTool(
         ...findBrokenHashLinks(file.content),
         ...(opts.requireDesignMd ? requiredDesignMdErrors(fs, path) : []),
         ...designMdWorkspaceErrors(fs, path),
+        ...externalResourceWorkspaceErrors(fs, path),
       ];
       if (runtimeVerify && isRenderableDesignSourcePath(path)) {
         try {

@@ -8,6 +8,7 @@ export interface ToolAvailabilityDeps {
   fs: boolean;
   preview: boolean;
   image: boolean;
+  webAsset: boolean;
   workspaceInspector: boolean;
   workspaceReader: boolean;
   ask: boolean;

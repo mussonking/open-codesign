@@ -35,6 +35,7 @@ import { requestAsk } from '../ask-ipc';
 import { CHATGPT_CODEX_PROVIDER_ID, getCodexTokenStore } from '../codex-oauth-ipc';
 import { makeRuntimeVerifier } from '../done-verify';
 import { app, ipcMain } from '../electron-runtime';
+import { importExternalWebAsset } from '../external-web-asset';
 import {
   acquireInFlightWorkspaceGeneration,
   armGenerationTimeout,
@@ -512,6 +513,23 @@ export function registerGenerateIpc({ db, getMainWindow }: RegisterGenerateIpcDe
           }
         }
       : undefined;
+    const importWebAsset = async (
+      request: Parameters<typeof importExternalWebAsset>[0]['request'],
+      signal?: AbortSignal,
+    ) =>
+      withStableWorkspacePath(designId, async () => {
+        const result = await importExternalWebAsset({
+          sessionId: id,
+          workspaceRoot: currentWorkspaceRoot(),
+          request,
+          getMainWindow,
+          signal,
+        });
+        for (const imported of result.files) {
+          fsMap.set(imported.path, '');
+        }
+        return result;
+      });
 
     let deltaCount = 0;
     let turnTextBuffer = '';
@@ -545,6 +563,7 @@ export function registerGenerateIpc({ db, getMainWindow }: RegisterGenerateIpcDe
         fs,
         runtimeVerify,
         ...(generateImageAsset !== undefined ? { generateImageAsset } : {}),
+        importWebAsset,
         ...(memoryCallbacks?.onAggressivePrune !== undefined
           ? { onAggressivePrune: memoryCallbacks.onAggressivePrune }
           : {}),

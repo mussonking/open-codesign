@@ -119,6 +119,15 @@ export {
   makeGenerateImageAssetTool,
 } from './tools/generate-image-asset.js';
 export {
+  type ImportedWebAssetFile,
+  type ImportWebAssetDetails,
+  type ImportWebAssetFn,
+  type ImportWebAssetKind,
+  type ImportWebAssetRequest,
+  type ImportWebAssetResult,
+  makeImportWebAssetTool,
+} from './tools/import-web-asset.js';
+export {
   type InspectWorkspaceFileInput,
   type InspectWorkspaceFn,
   inspectWorkspaceFiles,
@@ -281,6 +290,12 @@ export interface GenerateInput {
   askBridge?:
     | ((input: import('./tools/ask.js').AskInput) => Promise<import('./tools/ask.js').AskResult>)
     | undefined;
+  /**
+   * Optional host bridge for `import_web_asset`. The host owns network
+   * permission UI, allowlist persistence, and workspace writes; core only
+   * exposes the tool contract.
+   */
+  importWebAsset?: import('./tools/import-web-asset.js').ImportWebAssetFn | undefined;
 }
 
 export interface ApplyCommentInput {

@@ -102,6 +102,7 @@ import {
   type GenerateImageAssetFn,
   makeGenerateImageAssetTool,
 } from './tools/generate-image-asset.js';
+import { type ImportWebAssetFn, makeImportWebAssetTool } from './tools/import-web-asset.js';
 import { makeInspectWorkspaceTool } from './tools/inspect-workspace.js';
 import { makePreviewTool } from './tools/preview.js';
 import { makeScaffoldTool, type ScaffoldDetails } from './tools/scaffold.js';
@@ -482,6 +483,7 @@ function attachmentImagesForModel(input: GenerateInput, model: PiModel): PiAiIma
 
 function agenticToolGuidance(input: {
   inspectWorkspace: boolean;
+  importWebAsset: boolean;
   featureProfile: PromptFeatureProfile;
   currentDesignName?: string | undefined;
 }): string {
@@ -522,6 +524,9 @@ function agenticToolGuidance(input: {
     '- Use `create` for new files; follow-up edits use `view`, `str_replace`, or `insert`.',
     '- Do not emit `<artifact>` tags, fenced source blocks, raw HTML/JSX/CSS, or HTML wrappers in chat.',
     '- Local workspace assets and scaffolded files are allowed. External scripts remain restricted by the base output rules.',
+    input.importWebAsset
+      ? '- External fonts, images, SVGs, and other design assets require user consent. Ask in chat before optional web resources, then call `import_web_asset` and use only the returned local `assets/...` path.'
+      : '- Do not hotlink external fonts, images, SVGs, stylesheets, or media. Ask the user for a local file when a web resource is needed.',
     '- Interleave major tool groups with one short assistant progress sentence: what you are about to inspect/write/preview/fix, or what the preview showed. Keep it under 18 words and do not reveal hidden reasoning.',
     '',
     '## Tool loop',
@@ -545,6 +550,16 @@ const IMAGE_ASSET_TOOL_GUIDANCE = [
   'Use inline SVG/CSS for charts, simple icons, flat geometric marks, gradients, and UI chrome.',
   'Each call needs a production prompt, accurate `purpose`, matching `aspectRatio`, meaningful `alt`, and optional `filenameHint`.',
   'Reference the returned local `assets/...` path from the design source.',
+].join('\n');
+
+const WEB_ASSET_TOOL_GUIDANCE = [
+  '## External design resources',
+  '',
+  'Use `import_web_asset` for approved HTTPS fonts, images, SVGs, and static design assets from the web.',
+  'For optional resources, call `ask()` first with the resource name, source domain, usage, destination intent, and license note; continue only after the user accepts.',
+  'The host will show a blocking permission dialog before any network download. Respect denial and choose local/generated alternatives.',
+  'Never write `https://...` resource references into JSX/HTML/CSS (`src`, `poster`, `srcset`, CSS `url()`, `@import`, or stylesheet `<link>`). Use the local path returned by the tool.',
+  'For fonts, paste the returned `@font-face` CSS and use the returned local `assets/fonts/...` files with `font-display: swap`.',
 ].join('\n');
 
 // ---------------------------------------------------------------------------
@@ -949,6 +964,12 @@ export interface GenerateViaAgentDeps {
    * poster/background asset is worth generating.
    */
   generateImageAsset?: GenerateImageAssetFn | undefined;
+  /**
+   * Optional host-injected web asset importer. When provided, the default
+   * toolset adds `import_web_asset` for permissioned, local-first downloads of
+   * external fonts and static design assets.
+   */
+  importWebAsset?: ImportWebAssetFn | undefined;
   /** Called when aggressive context pruning triggers (context > 200KB). */
   onAggressivePrune?: (() => void) | undefined;
   /** Called after the agent finishes with the full conversation messages. */
@@ -1154,6 +1175,15 @@ export async function generateViaAgent(
       ),
     );
   }
+  if (deps.importWebAsset) {
+    defaultToolsByName.set(
+      'import_web_asset',
+      wrapPlanningGate(
+        makeImportWebAssetTool(deps.importWebAsset) as unknown as AgentTool<TSchema, unknown>,
+        runProtocolState,
+      ),
+    );
+  }
   if (input.inspectWorkspace) {
     defaultToolsByName.set(
       'inspect_workspace',
@@ -1182,6 +1212,7 @@ export async function generateViaAgent(
     workspaceInspector: input.inspectWorkspace !== undefined,
     workspaceReader: input.readWorkspaceFiles !== undefined && !tweaksExplicitlyDisabled,
     ask: input.askBridge !== undefined,
+    webAsset: deps.importWebAsset !== undefined,
   })
     .map((name) => defaultToolsByName.get(name))
     .filter((tool): tool is AgentTool<TSchema, unknown> => tool !== undefined);
@@ -1189,13 +1220,15 @@ export async function generateViaAgent(
   const encourageToolUse = deps.encourageToolUse ?? tools.length > 0;
   const baseAgenticGuidance = agenticToolGuidance({
     inspectWorkspace: input.inspectWorkspace !== undefined,
+    importWebAsset: deps.importWebAsset !== undefined,
     featureProfile,
     currentDesignName: promptInput.currentDesignName,
   });
-  const activeGuidance =
-    deps.generateImageAsset && !imageExplicitlyDisabled
-      ? `${baseAgenticGuidance}\n\n${IMAGE_ASSET_TOOL_GUIDANCE}`
-      : baseAgenticGuidance;
+  const activeGuidance = [
+    baseAgenticGuidance,
+    ...(deps.generateImageAsset && !imageExplicitlyDisabled ? [IMAGE_ASSET_TOOL_GUIDANCE] : []),
+    ...(deps.importWebAsset ? [WEB_ASSET_TOOL_GUIDANCE] : []),
+  ].join('\n\n');
   const promptImages = attachmentImagesForModel(input, piModel);
   const augmentedSystemPrompt = [
     encourageToolUse ? `${systemPrompt}\n\n${activeGuidance}` : systemPrompt,

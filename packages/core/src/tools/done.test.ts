@@ -109,6 +109,31 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App/>);`,
     expect(res.details.errors.some((e) => /alt/.test(e.message))).toBe(true);
   });
 
+  it('blocks unapproved external resource references in source files', async () => {
+    const fs = makeFs({
+      'App.jsx': `function App() {
+  return <main><img src="https://example.com/hero.png" alt="Hero" /></main>;
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);`,
+    });
+    const tool = makeDoneTool(fs);
+    const res = await tool.execute('id-external-resource', {});
+    expect(res.details.status).toBe('has_errors');
+    expect(res.details.errors.some((e) => e.message.includes('import_web_asset'))).toBe(true);
+  });
+
+  it('allows ordinary external anchor links while blocking stylesheet links', async () => {
+    const fs = makeFs({
+      'index.html':
+        '<!doctype html><html><head><link rel="stylesheet" href="https://example.com/app.css"></head><body><a href="https://example.com">Visit</a></body></html>',
+    });
+    const tool = makeDoneTool(fs);
+    const res = await tool.execute('id-external-link', {});
+    expect(res.details.status).toBe('has_errors');
+    expect(res.details.errors).toHaveLength(1);
+    expect(res.details.errors[0]?.message).toContain('<link>');
+  });
+
   it('flags hash links that point to missing in-page destinations', async () => {
     const fs = makeFs({
       'App.jsx': `function App() {

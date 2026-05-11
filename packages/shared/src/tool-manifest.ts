@@ -19,7 +19,9 @@ export interface ToolManifestEntryV1 {
   label: string;
   iconKey: ToolManifestIconKeyV1;
   status: ToolManifestStatusV1;
-  requires: Array<'fs' | 'preview' | 'image' | 'workspaceInspector' | 'workspaceReader' | 'ask'>;
+  requires: Array<
+    'fs' | 'preview' | 'image' | 'workspaceInspector' | 'workspaceReader' | 'ask' | 'webAsset'
+  >;
 }
 
 export interface ToolManifestV1 {
@@ -37,6 +39,7 @@ export const CURRENT_TOOL_ORDER = [
   'done',
   'preview',
   'generate_image_asset',
+  'import_web_asset',
   'tweaks',
   'ask',
 ] as const;
@@ -78,6 +81,13 @@ export const TOOL_MANIFEST_V1: ToolManifestV1 = {
       iconKey: 'image',
       status: 'current',
       requires: ['image'],
+    },
+    {
+      name: 'import_web_asset',
+      label: 'import_web_asset',
+      iconKey: 'file-plus',
+      status: 'current',
+      requires: ['webAsset'],
     },
     {
       name: 'tweaks',

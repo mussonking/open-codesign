@@ -180,6 +180,38 @@ describe('workspace files IPC legacy workspace fallback', () => {
     );
   });
 
+  it('imports font files into assets/fonts with font MIME metadata', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'codesign-import-font-workspace-'));
+    const sourceDir = await mkdtemp(path.join(tmpdir(), 'codesign-import-font-source-'));
+    const fontPath = path.join(sourceDir, 'demo.woff2');
+    await writeFile(fontPath, Buffer.from([0x77, 0x4f, 0x46, 0x32]));
+
+    const db = initInMemoryDb();
+    const design = createDesign(db, 'Font import design');
+    updateDesignWorkspace(db, design.id, root);
+    registerWorkspaceIpc(db, () => null);
+
+    const importFiles = getHandler('codesign:files:v1:import-to-workspace');
+    const result = await importFiles(null, {
+      schemaVersion: 1,
+      designId: design.id,
+      source: 'composer',
+      files: [{ path: fontPath }],
+    });
+
+    expect(result).toMatchObject([
+      {
+        path: 'assets/fonts/demo.woff2',
+        mediaType: 'font/woff2',
+        kind: 'asset',
+        source: 'composer',
+      },
+    ]);
+    await expect(readFile(path.join(root, 'assets', 'fonts', 'demo.woff2'))).resolves.toEqual(
+      Buffer.from([0x77, 0x4f, 0x46, 0x32]),
+    );
+  });
+
   it('touches design activity when importing files into the workspace', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'codesign-import-touch-workspace-'));
     const sourceDir = await mkdtemp(path.join(tmpdir(), 'codesign-import-touch-source-'));

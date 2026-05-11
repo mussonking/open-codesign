@@ -161,6 +161,13 @@ ReactDOM.createRoot(document.getElementById("root")).render(<App/>);`;
     expect(out).toContain('TWEAK_DEFAULTS');
   });
 
+  it('does not inject remote web fonts into JSX previews', () => {
+    const out = buildSrcdoc(jsxArtifact);
+    expect(out).not.toContain('fonts.googleapis.com');
+    expect(out).not.toContain('fonts.gstatic.com');
+    expect(out).toContain('font-family:system-ui');
+  });
+
   it('hydrates tweak CSS variables before running the artifact script', () => {
     const out = buildSrcdoc(jsxArtifact);
 
@@ -223,6 +230,8 @@ describe('buildStandaloneDocument', () => {
     expect(out).toContain('window.Babel.transform');
     expect(out).toContain('<div id="root"></div>');
     expect(out).not.toContain('CODESIGN_OVERLAY_SCRIPT');
+    expect(out).not.toContain('fonts.googleapis.com');
+    expect(out).not.toContain('fonts.gstatic.com');
   });
 
   it('initializes EDITMODE CSS variables in standalone JSX exports', () => {

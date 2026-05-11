@@ -684,12 +684,16 @@ const MIME_BY_EXTENSION: Record<string, string> = {
   '.pdf': 'application/pdf',
   '.png': 'image/png',
   '.svg': 'image/svg+xml',
+  '.otf': 'font/otf',
   '.toml': 'application/toml',
+  '.ttf': 'font/ttf',
   '.ts': 'text/typescript',
   '.tsx': 'text/typescript',
   '.txt': 'text/plain',
   '.webm': 'video/webm',
   '.webp': 'image/webp',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
   '.xml': 'application/xml',
   '.yaml': 'application/yaml',
   '.yml': 'application/yaml',
@@ -730,6 +734,10 @@ function extensionForMediaType(mediaType: string): string {
   if (mediaType === 'image/webp') return '.webp';
   if (mediaType === 'image/gif') return '.gif';
   if (mediaType === 'image/svg+xml') return '.svg';
+  if (mediaType === 'font/woff2') return '.woff2';
+  if (mediaType === 'font/woff') return '.woff';
+  if (mediaType === 'font/ttf') return '.ttf';
+  if (mediaType === 'font/otf') return '.otf';
   if (mediaType === 'application/pdf') return '.pdf';
   if (mediaType.startsWith('text/')) return '.txt';
   return '.bin';
@@ -759,25 +767,49 @@ function importKindFor(
   name: string,
   mediaType: string,
 ): WorkspaceImportKind {
-  if (source === 'composer' || source === 'canvas' || source === 'clipboard') return 'reference';
+  if (source === 'composer' || source === 'canvas' || source === 'clipboard') {
+    return isFontImportName(name, mediaType) ? 'asset' : 'reference';
+  }
   const ext = path.extname(name).toLowerCase();
   if (ASSET_EXTENSIONS.has(ext)) return 'asset';
   if (
     mediaType.startsWith('image/') ||
     mediaType.startsWith('video/') ||
-    mediaType.startsWith('audio/')
+    mediaType.startsWith('audio/') ||
+    mediaType.startsWith('font/')
   ) {
     return 'asset';
   }
   return 'reference';
 }
 
+function isFontImportName(name: string, mediaType: string): boolean {
+  const ext = path.extname(name).toLowerCase();
+  return (
+    ext === '.otf' ||
+    ext === '.ttf' ||
+    ext === '.woff' ||
+    ext === '.woff2' ||
+    mediaType === 'font/otf' ||
+    mediaType === 'font/ttf' ||
+    mediaType === 'font/woff' ||
+    mediaType === 'font/woff2'
+  );
+}
+
 async function uniqueWorkspaceDestination(
   workspacePath: string,
   kind: WorkspaceImportKind,
   name: string,
+  mediaType?: string,
 ): Promise<{ relativePath: string; absolutePath: string; name: string }> {
-  const dir = kind === 'asset' ? 'assets' : 'references';
+  const effectiveMediaType = mediaType ?? mediaTypeForName(name);
+  const dir =
+    kind === 'asset'
+      ? isFontImportName(name, effectiveMediaType)
+        ? 'assets/fonts'
+        : 'assets'
+      : 'references';
   const parsed = path.parse(sanitizeImportName(name, 'imported-file'));
   const ext = parsed.ext;
   const stem = parsed.name.length > 0 ? parsed.name : 'imported-file';
@@ -2178,7 +2210,12 @@ export function registerWorkspaceIpc(db: Database, getWin: () => BrowserWindow |
         const inputName = sanitizeImportName(file.name ?? sourcePath, 'imported-file');
         const mediaType = mediaTypeForName(inputName);
         const kind = importKindFor(source, inputName, mediaType);
-        const destination = await uniqueWorkspaceDestination(workspacePath, kind, inputName);
+        const destination = await uniqueWorkspaceDestination(
+          workspacePath,
+          kind,
+          inputName,
+          mediaType,
+        );
         await mkdir(path.dirname(destination.absolutePath), { recursive: true });
         await copyFile(sourcePath, destination.absolutePath);
         const written = await stat(destination.absolutePath);
@@ -2197,7 +2234,12 @@ export function registerWorkspaceIpc(db: Database, getWin: () => BrowserWindow |
         const inputName = pastedName(blob.name, blob.mediaType, timestamp);
         const mediaType = blob.mediaType;
         const kind = importKindFor(source, inputName, mediaType);
-        const destination = await uniqueWorkspaceDestination(workspacePath, kind, inputName);
+        const destination = await uniqueWorkspaceDestination(
+          workspacePath,
+          kind,
+          inputName,
+          mediaType,
+        );
         await mkdir(path.dirname(destination.absolutePath), { recursive: true });
         const bytes = Buffer.from(blob.dataBase64, 'base64');
         await writeFile(destination.absolutePath, bytes);

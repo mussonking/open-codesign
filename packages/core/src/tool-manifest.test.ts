@@ -14,6 +14,7 @@ describe('tool-manifest', () => {
       'done',
       'preview',
       'generate_image_asset',
+      'import_web_asset',
       'tweaks',
       'ask',
     ]);
@@ -28,6 +29,7 @@ describe('tool-manifest', () => {
       fs: false,
       preview: true,
       image: true,
+      webAsset: true,
       workspaceInspector: true,
       workspaceReader: true,
       ask: true,
@@ -36,13 +38,15 @@ describe('tool-manifest', () => {
     expect(tools).not.toContain('done');
     expect(tools).toContain('preview');
     expect(tools).toContain('generate_image_asset');
+    expect(tools).toContain('import_web_asset');
   });
 
-  it('gates preview, image, inspect, tweaks, and ask on host capabilities', () => {
+  it('gates preview, image, web assets, inspect, tweaks, and ask on host capabilities', () => {
     const tools = availableToolNames({
       fs: true,
       preview: false,
       image: false,
+      webAsset: false,
       workspaceInspector: false,
       workspaceReader: false,
       ask: false,
@@ -62,6 +66,7 @@ describe('tool-manifest', () => {
       fs: true,
       preview: false,
       image: false,
+      webAsset: false,
       workspaceInspector: true,
       workspaceReader: false,
       ask: false,

@@ -4,6 +4,7 @@ import { CommentsPanel } from './components/comment/CommentsPanel';
 import { DeleteDesignDialog } from './components/DeleteDesignDialog';
 import { DesignsView } from './components/DesignsView';
 import { ReportEventDialog } from './components/diagnostics/ReportEventDialog';
+import { ExternalResourcePermissionDialog } from './components/ExternalResourcePermissionDialog';
 import { NewDesignDialog } from './components/NewDesignDialog';
 import { PermissionDialog } from './components/PermissionDialog';
 import { RebindWorkspaceDialog } from './components/RebindWorkspaceDialog';
@@ -264,6 +265,7 @@ export function App() {
       <ToastViewport />
       <CommentsPanel />
       <PermissionDialog />
+      <ExternalResourcePermissionDialog />
       <ReportEventDialog localId={activeReportLocalId} onClose={closeReportDialog} />
     </div>
   );
