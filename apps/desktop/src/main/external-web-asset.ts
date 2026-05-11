@@ -23,6 +23,20 @@ const MAX_DIRECT_BYTES = 10 * 1024 * 1024;
 const MAX_STYLESHEET_BYTES = 256 * 1024;
 const MAX_GOOGLE_FONT_FILES = 12;
 const MAX_REDIRECTS = 3;
+const SVG_ACTIVE_ELEMENTS = [
+  'script',
+  'foreignObject',
+  'iframe',
+  'frame',
+  'object',
+  'embed',
+  'audio',
+  'video',
+  'canvas',
+  'link',
+  'meta',
+  'base',
+].join('|');
 
 const FONT_EXTENSIONS = new Set(['.woff2', '.woff', '.ttf', '.otf']);
 const IMAGE_EXTENSIONS = new Set([
@@ -140,14 +154,16 @@ async function importDirectAsset(
     path.extname(provisionalPath).toLowerCase() === ext
       ? provisionalPath
       : await allocateDestinationPath(context.workspaceRoot, request, parsed, ext);
-  await writeWorkspaceBytes(context.workspaceRoot, destinationPath, response.bytes);
+  const writeBytes = kind === 'svg' ? sanitizeSvgAssetBytes(response.bytes) : response.bytes;
+  const fileMimeType = kind === 'svg' ? 'image/svg+xml' : mimeType;
+  await writeWorkspaceBytes(context.workspaceRoot, destinationPath, writeBytes);
   const file = {
     path: destinationPath,
     sourceUrl: response.finalUrl,
-    mimeType,
-    bytes: response.bytes.byteLength,
+    mimeType: fileMimeType,
+    bytes: writeBytes.byteLength,
   };
-  const css = kind === 'font' ? fontFaceCss(request, file, parsed, mimeType) : undefined;
+  const css = kind === 'font' ? fontFaceCss(request, file, parsed, fileMimeType) : undefined;
   return resultForFiles({
     kind,
     sourceUrl: parsed.toString(),
@@ -548,6 +564,138 @@ function assertSupportedKind(
       ERROR_CODES.REFERENCE_URL_UNSUPPORTED,
     );
   }
+}
+
+export function sanitizeSvgAssetBytes(bytes: Buffer): Buffer {
+  const raw = bytes.toString('utf8').replace(/^\uFEFF/, '');
+  if (!/<svg(?:\s|>)/i.test(raw)) {
+    throw new CodesignError(
+      'External SVG did not contain an <svg> root',
+      ERROR_CODES.IPC_BAD_INPUT,
+    );
+  }
+  const sanitized = sanitizeSvgAssetText(raw).trimStart();
+  if (!/<svg(?:\s|>)/i.test(sanitized)) {
+    throw new CodesignError('External SVG was empty after sanitization', ERROR_CODES.IPC_BAD_INPUT);
+  }
+  return Buffer.from(sanitized, 'utf8');
+}
+
+export function sanitizeSvgAssetText(raw: string): string {
+  let svg = raw
+    .replace(/<!doctype\b[\s\S]*?(?:\]\s*)?>/gi, '')
+    .replace(/<!entity\b[^>]*>/gi, '')
+    .replace(/<\?xml-stylesheet\b[^?]*\?>/gi, '');
+  svg = stripSvgActiveElements(svg);
+  svg = stripSvgAnchorWrappers(svg);
+  svg = sanitizeSvgStyleBlocks(svg);
+  return stripSvgRiskyAttributes(svg);
+}
+
+function stripSvgActiveElements(svg: string): string {
+  const paired = new RegExp(
+    `<\\s*(${SVG_ACTIVE_ELEMENTS})\\b[^>]*>[\\s\\S]*?<\\s*\\/\\s*\\1\\s*>`,
+    'gi',
+  );
+  const selfClosing = new RegExp(`<\\s*(?:${SVG_ACTIVE_ELEMENTS})\\b[^>]*/\\s*>`, 'gi');
+  return svg.replace(paired, '').replace(selfClosing, '');
+}
+
+function stripSvgAnchorWrappers(svg: string): string {
+  return svg.replace(/<\s*a\b[^>]*>/gi, '').replace(/<\s*\/\s*a\s*>/gi, '');
+}
+
+function sanitizeSvgStyleBlocks(svg: string): string {
+  return svg.replace(/<style\b([^>]*)>([\s\S]*?)<\/style>/gi, (_match, attrs, css) => {
+    const safeCss = sanitizeSvgCssText(String(css));
+    if (safeCss.trim().length === 0) return '';
+    return `<style${String(attrs)}>${safeCss}</style>`;
+  });
+}
+
+function sanitizeSvgCssText(css: string): string {
+  return css
+    .replace(/@import\b[^;]+;?/gi, '')
+    .replace(/url\(\s*(['"]?)(?:https?:|\/\/|data:|javascript:)[^)]+\)/gi, 'none')
+    .replace(/javascript\s*:/gi, '');
+}
+
+function stripSvgRiskyAttributes(svg: string): string {
+  return svg.replace(
+    /\s+([:@A-Za-z0-9_-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/g,
+    (
+      match: string,
+      rawName: string,
+      doubleValue?: string,
+      singleValue?: string,
+      bareValue?: string,
+    ) => {
+      const name = rawName.toLowerCase();
+      const value = doubleValue ?? singleValue ?? bareValue ?? '';
+      if (name === 'xmlns' || name.startsWith('xmlns:')) return match;
+      if (name.startsWith('on')) return '';
+      if (name === 'target' || name === 'download') return '';
+      if ((name === 'href' || name === 'xlink:href' || name === 'src') && isUnsafeSvgUrl(value)) {
+        return '';
+      }
+      if (containsUnsafeSvgUrl(value)) return '';
+      return match;
+    },
+  );
+}
+
+function isUnsafeSvgUrl(value: string): boolean {
+  const normalized = normalizeSvgUrl(value);
+  return (
+    normalized.startsWith('http:') ||
+    normalized.startsWith('https:') ||
+    normalized.startsWith('//') ||
+    normalized.startsWith('data:') ||
+    normalized.startsWith('javascript:')
+  );
+}
+
+function containsUnsafeSvgUrl(value: string): boolean {
+  const normalized = normalizeSvgUrl(value);
+  return (
+    normalized.includes('url(http:') ||
+    normalized.includes('url(https:') ||
+    normalized.includes('url(//') ||
+    normalized.includes('url(data:') ||
+    normalized.includes('url(javascript:') ||
+    normalized.includes('javascript:')
+  );
+}
+
+function normalizeSvgUrl(value: string): string {
+  return stripSvgUrlNoise(decodeNumericEntities(value)).toLowerCase();
+}
+
+function stripSvgUrlNoise(value: string): string {
+  let out = '';
+  for (const char of value) {
+    const codePoint = char.codePointAt(0);
+    if (codePoint === undefined || codePoint <= 0x20 || codePoint === 0x7f || /\s/.test(char)) {
+      continue;
+    }
+    out += char;
+  }
+  return out;
+}
+
+function decodeNumericEntities(value: string): string {
+  return value.replace(/&#(x[0-9a-fA-F]+|\d+);?/g, (match, raw: string) => {
+    const codePoint =
+      raw.startsWith('x') || raw.startsWith('X')
+        ? Number.parseInt(raw.slice(1), 16)
+        : Number.parseInt(raw, 10);
+    if (!Number.isFinite(codePoint)) return match;
+    try {
+      return String.fromCodePoint(codePoint);
+    } catch {
+      return match;
+    }
+  });
 }
 
 async function allocateDestinationPath(

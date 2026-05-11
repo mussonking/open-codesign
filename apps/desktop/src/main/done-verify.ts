@@ -49,7 +49,8 @@ export function isRuntimeVerifierConsoleNoise(message: string): boolean {
   return (
     (message.includes('Electron Security Warning') &&
       message.includes('Insecure Content-Security-Policy')) ||
-    message.startsWith('You are using the in-browser Babel transformer.')
+    message.startsWith('You are using the in-browser Babel transformer.') ||
+    message === 'Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector'
   );
 }
 

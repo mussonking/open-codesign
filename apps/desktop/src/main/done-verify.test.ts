@@ -36,6 +36,19 @@ describe('done runtime verifier error formatting', () => {
     );
   });
 
+  it('filters the headless Inspector blocked-resource noise from artifact verification', () => {
+    expect(
+      isRuntimeVerifierConsoleNoise(
+        'Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector',
+      ),
+    ).toBe(true);
+    expect(
+      isRuntimeVerifierConsoleNoise(
+        'Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.assets/logo.svg',
+      ),
+    ).toBe(false);
+  });
+
   it('allows only the verifier file for file:// requests', () => {
     const verifyFilePath = join(tmpdir(), 'codesign-done', 'verify.html');
     expect(isDoneVerifierRequestAllowed(pathToFileURL(verifyFilePath).href, verifyFilePath)).toBe(
