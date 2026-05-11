@@ -1,12 +1,12 @@
-import { setLocale as applyLocale, getCurrentLocale, useT } from '@open-codesign/i18n';
 import type { Locale } from '@open-codesign/i18n';
+import { setLocale as applyLocale, getCurrentLocale, useT } from '@open-codesign/i18n';
 import { Globe } from 'lucide-react';
 import type { CSSProperties } from 'react';
 import { useEffect, useState } from 'react';
 
 const noDragStyle = { WebkitAppRegion: 'no-drag' } as CSSProperties;
 
-const LOCALE_CYCLE: Locale[] = ['en', 'zh-CN', 'pt-BR'];
+const LOCALE_CYCLE: Locale[] = ['en', 'es', 'pt-BR', 'zh-CN'];
 
 function nextLocale(locale: Locale): Locale {
   const i = LOCALE_CYCLE.indexOf(locale);
@@ -16,6 +16,7 @@ function nextLocale(locale: Locale): Locale {
 function localeLabel(locale: Locale): string {
   if (locale === 'zh-CN') return 'ZH';
   if (locale === 'pt-BR') return 'PT';
+  if (locale === 'es') return 'ES';
   return 'EN';
 }
 
@@ -39,7 +40,7 @@ export function LanguageToggle() {
       type="button"
       onClick={() => void handleToggle()}
       style={noDragStyle}
-      className="inline-flex items-center gap-[var(--space-2)] h-[40px] px-[var(--space-3)] rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--text-sm)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] transition-colors"
+      className="inline-flex h-10 items-center gap-[var(--space-2)] rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-[var(--space-3)] text-[var(--text-sm)] font-medium text-[var(--color-text-primary)] whitespace-nowrap transition-colors hover:bg-[var(--color-surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus-ring)]"
       aria-label={t('settings.language.label')}
       title={t('settings.language.label')}
     >

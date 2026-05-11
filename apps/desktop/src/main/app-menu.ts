@@ -1,5 +1,6 @@
-import { Menu, app, dialog } from 'electron';
+import { app, dialog, Menu } from 'electron';
 import { autoUpdater } from 'electron-updater';
+import { getUpdateErrorMessage, isMissingUpdateMetadataError } from './update-errors';
 
 export function registerAppMenu(): void {
   const template: Electron.MenuItemConstructorOptions[] = [
@@ -35,7 +36,7 @@ export function registerAppMenu(): void {
             }
             try {
               const result = await autoUpdater.checkForUpdates();
-              if (!result || !result.updateInfo) {
+              if (!result?.updateInfo) {
                 dialog.showMessageBox({
                   type: 'info',
                   title: 'Update Check',
@@ -53,10 +54,16 @@ export function registerAppMenu(): void {
               // If a newer version is available, the update-available event fires
               // and the renderer banner handles it — no dialog needed here.
             } catch (err) {
-              dialog.showErrorBox(
-                'Update Check Failed',
-                err instanceof Error ? err.message : String(err),
-              );
+              if (isMissingUpdateMetadataError(err)) {
+                dialog.showMessageBox({
+                  type: 'info',
+                  title: 'Update Check Unavailable',
+                  message:
+                    'No update channel metadata has been published for this build yet. Try again after the next public release.',
+                });
+                return;
+              }
+              dialog.showErrorBox('Update Check Failed', getUpdateErrorMessage(err));
             }
           },
         },

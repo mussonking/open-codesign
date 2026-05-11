@@ -1,22 +1,42 @@
+import {
+  collapseWhitespace,
+  decodeHtmlEntities,
+  extractHtmlElementInner,
+  removeHtmlComments,
+  removeHtmlElementBlocks,
+  stripHtmlTags,
+} from '@open-codesign/shared/html-utils';
 import type { ExportResult } from './index';
+import {
+  type BrowserRenderOptions,
+  buildExportHtmlDocument,
+  renderArtifactBodyHtml,
+  shouldRenderForStaticDom,
+} from './rendered-html';
 
 export interface MarkdownMeta {
   title?: string;
   schemaVersion: 1;
 }
 
-export interface ExportMarkdownOptions {
+export interface ExportMarkdownOptions extends BrowserRenderOptions {
   meta?: Partial<MarkdownMeta>;
 }
 
 export async function exportMarkdown(
-  htmlContent: string,
+  artifactSource: string,
   destinationPath: string,
   opts: ExportMarkdownOptions = {},
 ): Promise<ExportResult> {
   const fs = await import('node:fs/promises');
-  const md = htmlToMarkdown(htmlContent, {
-    title: opts.meta?.title ?? deriveTitle(htmlContent),
+  const html = shouldRenderForStaticDom(artifactSource, opts)
+    ? await renderArtifactBodyHtml(artifactSource, {
+        ...opts,
+        injectTailwind: opts.injectTailwind ?? false,
+      })
+    : await buildExportHtmlDocument(artifactSource, opts);
+  const md = htmlToMarkdown(html, {
+    title: opts.meta?.title ?? deriveTitle(html),
     schemaVersion: 1,
   });
   await fs.writeFile(destinationPath, md, 'utf8');
@@ -65,20 +85,19 @@ function escapeYaml(value: string): string {
 }
 
 function deriveTitle(html: string): string {
-  const t = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html ?? '');
-  if (t?.[1]) return decodeEntities(stripTags(t[1])).trim();
-  const h1 = /<h1[^>]*>([\s\S]*?)<\/h1>/i.exec(html ?? '');
-  if (h1?.[1]) return decodeEntities(stripTags(h1[1])).trim();
+  const title = extractHtmlElementInner(html ?? '', 'title');
+  if (title) return decodeEntities(stripTags(title)).trim();
+  const h1 = extractHtmlElementInner(html ?? '', 'h1');
+  if (h1) return decodeEntities(stripTags(h1)).trim();
   return 'open-codesign export';
 }
 
 function convertBody(html: string): string {
   let out = html;
-  const headRe = /<head[\s>][\s\S]*?<\/head>/gi;
-  out = out.replace(headRe, '');
-  out = out.replace(/<script[\s\S]*?<\/script>/gi, '');
-  out = out.replace(/<style[\s\S]*?<\/style>/gi, '');
-  out = out.replace(/<!--[\s\S]*?-->/g, '');
+  out = removeHtmlElementBlocks(out, 'head');
+  out = removeHtmlElementBlocks(out, 'script');
+  out = removeHtmlElementBlocks(out, 'style');
+  out = removeHtmlComments(out);
 
   out = out.replace(/<pre[^>]*>([\s\S]*?)<\/pre>/gi, (_m, inner: string) => {
     const text = decodeEntities(stripTags(inner));
@@ -114,6 +133,10 @@ function convertBody(html: string): string {
     return safeSrc ? `![${alt}](${safeSrc})` : '';
   });
 
+  out = out.replace(/<table\b[^>]*>([\s\S]*?)<\/table>/gi, (_m, inner: string) => {
+    return renderTable(inner);
+  });
+
   out = out.replace(/<h([1-6])[^>]*>([\s\S]*?)<\/h\1>/gi, (_m, level: string, inner: string) => {
     const hashes = '#'.repeat(Number(level));
     return `\n\n${hashes} ${decodeEntities(stripTags(inner)).trim()}\n\n`;
@@ -144,7 +167,9 @@ function renderList(inner: string, ordered: boolean): string {
   while (m !== null) {
     const text = decodeEntities(stripTags(m[1] ?? ''))
       .trim()
-      .replace(/\s+/g, ' ');
+      .split('\n')
+      .map((line) => collapseWhitespace(line).trim())
+      .join(' ');
     const prefix = ordered ? `${i}.` : '-';
     items.push(`${prefix} ${text}`);
     i += 1;
@@ -153,8 +178,43 @@ function renderList(inner: string, ordered: boolean): string {
   return `\n\n${items.join('\n')}\n\n`;
 }
 
+function renderTable(inner: string): string {
+  const rows: string[][] = [];
+  const trRe = /<tr\b[^>]*>([\s\S]*?)<\/tr>/gi;
+  let rowMatch: RegExpExecArray | null = trRe.exec(inner);
+  while (rowMatch !== null) {
+    const cells: string[] = [];
+    const cellRe = /<t[hd]\b[^>]*>([\s\S]*?)<\/t[hd]>/gi;
+    let cellMatch: RegExpExecArray | null = cellRe.exec(rowMatch[1] ?? '');
+    while (cellMatch !== null) {
+      const cell = escapeMarkdownTableCell(
+        collapseWhitespace(decodeEntities(stripTags(cellMatch[1] ?? ''))).trim(),
+      );
+      cells.push(cell);
+      cellMatch = cellRe.exec(rowMatch[1] ?? '');
+    }
+    if (cells.length > 0) rows.push(cells);
+    rowMatch = trRe.exec(inner);
+  }
+  if (rows.length === 0) return '';
+
+  const width = Math.max(...rows.map((row) => row.length));
+  const padded = rows.map((row) => [
+    ...row,
+    ...Array.from({ length: width - row.length }, () => ''),
+  ]);
+  const header = padded[0] ?? [];
+  const separator = Array.from({ length: width }, () => '---');
+  const body = padded.slice(1);
+  return `\n\n${[header, separator, ...body].map((row) => `| ${row.join(' | ')} |`).join('\n')}\n\n`;
+}
+
+function escapeMarkdownTableCell(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/\|/g, '\\|');
+}
+
 function stripTags(input: string): string {
-  return input.replace(/<[^>]+>/g, '');
+  return stripHtmlTags(input);
 }
 
 /**
@@ -166,52 +226,78 @@ export function sanitizeUrl(raw: string, kind: 'link' | 'image'): string | null 
   const output = stripControlChars(raw).trim();
   if (!output) return null;
 
-  let probe = output;
-  for (let i = 0; i < 3; i += 1) {
-    const next = decodeEntities(probe);
-    if (next === probe) break;
-    probe = next;
-  }
+  let probe = decodeUrlEntitiesForScheme(output);
+  let encodedScheme: string | null = null;
   const colonIdx = probe.indexOf(':');
   if (colonIdx > 0) {
     const schemePart = probe.slice(0, colonIdx);
-    if (/%[0-9a-fA-F]{2}/.test(schemePart)) {
+    if (hasPercentEncodedByte(schemePart)) {
       try {
-        probe = decodeURIComponent(schemePart) + probe.slice(colonIdx);
+        encodedScheme = urlScheme(`${decodeURIComponent(schemePart)}:`);
       } catch {
-        // Leave probe untouched — the regex below will catch obviously unsafe forms.
+        // Leave probe untouched; the scheme parser below catches unsafe forms.
       }
     }
   }
   probe = stripControlChars(probe).trim();
 
-  if (/^(https?:|mailto:)/i.test(probe)) return output;
-  if (kind === 'image' && /^data:image\/(png|jpe?g|gif|webp|svg\+xml|avif|bmp);/i.test(probe)) {
+  const scheme = urlScheme(probe) ?? encodedScheme;
+  if (scheme === 'http' || scheme === 'https' || scheme === 'mailto') return output;
+  if (kind === 'image' && isAllowedImageDataUrl(probe)) {
     return output;
   }
-  if (/^[a-z][a-z0-9+.-]*:/i.test(probe)) return null;
+  if (scheme !== null) return null;
   return output;
 }
 
-function decodeEntities(input: string): string {
-  return input
-    .replace(/&#x([0-9a-f]+);/gi, (_m, hex: string) => safeFromCodePoint(Number.parseInt(hex, 16)))
-    .replace(/&#(\d+);/g, (_m, dec: string) => safeFromCodePoint(Number.parseInt(dec, 10)))
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'");
+function hasPercentEncodedByte(value: string): boolean {
+  for (let i = 0; i + 2 < value.length; i += 1) {
+    if (value[i] !== '%') continue;
+    if (isHex(value[i + 1] ?? '') && isHex(value[i + 2] ?? '')) return true;
+  }
+  return false;
 }
 
-function safeFromCodePoint(code: number): string {
-  if (!Number.isFinite(code) || code < 0 || code > 0x10ffff) return '';
-  try {
-    return String.fromCodePoint(code);
-  } catch {
-    return '';
+function isHex(ch: string): boolean {
+  const code = ch.charCodeAt(0);
+  return (code >= 48 && code <= 57) || (code >= 65 && code <= 70) || (code >= 97 && code <= 102);
+}
+
+function urlScheme(value: string): string | null {
+  const colon = value.indexOf(':');
+  if (colon <= 0) return null;
+  const first = value.charCodeAt(0);
+  const startsAlpha = (first >= 65 && first <= 90) || (first >= 97 && first <= 122);
+  if (!startsAlpha) return null;
+  for (let i = 1; i < colon; i += 1) {
+    const code = value.charCodeAt(i);
+    const ok =
+      (code >= 65 && code <= 90) ||
+      (code >= 97 && code <= 122) ||
+      (code >= 48 && code <= 57) ||
+      value[i] === '+' ||
+      value[i] === '.' ||
+      value[i] === '-';
+    if (!ok) return null;
   }
+  return value.slice(0, colon).toLowerCase();
+}
+
+function isAllowedImageDataUrl(value: string): boolean {
+  const lower = value.toLowerCase();
+  if (!lower.startsWith('data:image/')) return false;
+  const semi = lower.indexOf(';');
+  if (semi < 0) return false;
+  const mime = lower.slice('data:image/'.length, semi);
+  return ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg+xml', 'avif', 'bmp'].includes(mime);
+}
+
+function decodeUrlEntitiesForScheme(input: string): string {
+  return decodeHtmlEntities(input);
+}
+
+function decodeEntities(input: string): string {
+  return decodeHtmlEntities(input);
 }
 
 function stripControlChars(input: string): string {

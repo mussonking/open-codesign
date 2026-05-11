@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import type { CodesignErrorCode } from './error-codes';
 
 export const ProviderId = z.enum([
   'anthropic',
@@ -16,14 +15,27 @@ export const ProviderId = z.enum([
 ]);
 export type ProviderId = z.infer<typeof ProviderId>;
 
-export const ModelRef = z.object({
-  // v3: providers may be custom ids (`custom-deepseek`, etc.), not just the
-  // legacy enum. Keep ProviderId as a documented convenience but let the wire
-  // do the dispatch downstream.
-  provider: z.string().min(1),
-  modelId: z.string(),
-});
+export const ModelRef = z
+  .object({
+    // v3: providers may be custom ids (`custom-deepseek`, etc.), not just the
+    // legacy enum. Keep ProviderId as a documented convenience but let the wire
+    // do the dispatch downstream.
+    provider: z.string().min(1),
+    modelId: z.string(),
+  })
+  .strict();
 export type ModelRef = z.infer<typeof ModelRef>;
+
+export {
+  type DesignMdBodySection,
+  type DesignMdDocument,
+  type DesignMdFinding,
+  type DesignMdFindingSeverity,
+  formatDesignMdForPrompt,
+  parseDesignMd,
+  validateDesignMd,
+} from './design-md';
+export { DEFAULT_SOURCE_ENTRY, LEGACY_SOURCE_ENTRY } from './source-entries';
 
 export const DesignParam = z.discriminatedUnion('type', [
   z.object({
@@ -65,12 +77,21 @@ export type DesignParam = z.infer<typeof DesignParam>;
 export const ArtifactType = z.enum(['html', 'svg', 'slides', 'bundle']);
 export type ArtifactType = z.infer<typeof ArtifactType>;
 
+export const ArtifactSourceFormat = z.enum(['jsx', 'html', 'svg', 'markdown']);
+export type ArtifactSourceFormat = z.infer<typeof ArtifactSourceFormat>;
+
+export const ArtifactRenderRuntime = z.enum(['react', 'static-html', 'svg', 'none']);
+export type ArtifactRenderRuntime = z.infer<typeof ArtifactRenderRuntime>;
+
 export const Artifact = z.object({
   id: z.string(),
   type: ArtifactType,
   title: z.string(),
   content: z.string(),
   designParams: z.array(DesignParam).default([]),
+  sourceFormat: ArtifactSourceFormat.optional(),
+  renderRuntime: ArtifactRenderRuntime.optional(),
+  entryPath: z.string().min(1).optional(),
   createdAt: z.string(),
 });
 export type Artifact = z.infer<typeof Artifact>;
@@ -78,33 +99,77 @@ export type Artifact = z.infer<typeof Artifact>;
 export const ChatRole = z.enum(['system', 'user', 'assistant']);
 export type ChatRole = z.infer<typeof ChatRole>;
 
-export const ChatMessage = z.object({
-  role: ChatRole,
-  content: z.string(),
-});
+export const ChatMessage = z
+  .object({
+    role: ChatRole,
+    content: z.string(),
+  })
+  .strict();
 export type ChatMessage = z.infer<typeof ChatMessage>;
 
-export const LocalInputFile = z.object({
-  path: z.string().min(1),
-  name: z.string().min(1),
-  size: z.number().int().nonnegative(),
-});
+export const DesignRunPreferenceMode = z.enum(['yes', 'no', 'auto']);
+export type DesignRunPreferenceMode = z.infer<typeof DesignRunPreferenceMode>;
+export const DesignRunPreferenceProvenance = z.enum(['explicit', 'inferred', 'default']);
+export type DesignRunPreferenceProvenance = z.infer<typeof DesignRunPreferenceProvenance>;
+export const DesignRunPreferenceConfidence = z.enum(['high', 'medium', 'low']);
+export type DesignRunPreferenceConfidence = z.infer<typeof DesignRunPreferenceConfidence>;
+export const DesignRunPreferenceRoutingEntry = z
+  .object({
+    provenance: DesignRunPreferenceProvenance,
+    confidence: DesignRunPreferenceConfidence,
+    reason: z.string().optional(),
+  })
+  .strict();
+export type DesignRunPreferenceRoutingEntry = z.infer<typeof DesignRunPreferenceRoutingEntry>;
+export const DesignRunPreferenceRouting = z
+  .object({
+    tweaks: DesignRunPreferenceRoutingEntry.optional(),
+    bitmapAssets: DesignRunPreferenceRoutingEntry.optional(),
+    reusableSystem: DesignRunPreferenceRoutingEntry.optional(),
+    visualDirection: DesignRunPreferenceRoutingEntry.optional(),
+  })
+  .strict();
+export type DesignRunPreferenceRouting = z.infer<typeof DesignRunPreferenceRouting>;
+
+export const DesignRunPreferencesV1 = z
+  .object({
+    schemaVersion: z.literal(1),
+    tweaks: DesignRunPreferenceMode,
+    bitmapAssets: DesignRunPreferenceMode,
+    reusableSystem: DesignRunPreferenceMode,
+    visualDirection: z.enum(['editorial', 'professional', 'bold', 'custom']).optional(),
+    routing: DesignRunPreferenceRouting.optional(),
+  })
+  .strict();
+export type DesignRunPreferencesV1 = z.infer<typeof DesignRunPreferencesV1>;
+
+export const LocalInputFile = z
+  .object({
+    path: z.string().min(1),
+    name: z.string().min(1),
+    size: z.number().int().nonnegative(),
+  })
+  .strict();
 export type LocalInputFile = z.infer<typeof LocalInputFile>;
 
-export const ElementSelectionRect = z.object({
-  top: z.number(),
-  left: z.number(),
-  width: z.number(),
-  height: z.number(),
-});
+export const ElementSelectionRect = z
+  .object({
+    top: z.number(),
+    left: z.number(),
+    width: z.number(),
+    height: z.number(),
+  })
+  .strict();
 export type ElementSelectionRect = z.infer<typeof ElementSelectionRect>;
 
-export const SelectedElement = z.object({
-  selector: z.string().min(1),
-  tag: z.string().min(1),
-  outerHTML: z.string(),
-  rect: ElementSelectionRect,
-});
+export const SelectedElement = z
+  .object({
+    selector: z.string().min(1),
+    tag: z.string().min(1),
+    outerHTML: z.string(),
+    rect: ElementSelectionRect,
+  })
+  .strict();
 export type SelectedElement = z.infer<typeof SelectedElement>;
 
 // Correlates renderer/main/core log lines for a single generation. Constrained
@@ -117,54 +182,46 @@ const GenerationId = z
   .max(128)
   .regex(/^[A-Za-z0-9_-]+$/, 'generationId must be alphanumeric, _ or -');
 
-export const GeneratePayload = z.object({
-  prompt: z.string().min(1).max(32_000),
-  history: z.array(ChatMessage).max(200),
-  model: ModelRef,
-  baseUrl: z.string().url().optional(),
-  referenceUrl: z.string().url().optional(),
-  attachments: z.array(LocalInputFile).max(12).default([]),
-  generationId: GenerationId.optional(),
-});
-export type GeneratePayload = z.infer<typeof GeneratePayload>;
-
-/** @deprecated Use GeneratePayloadV1. */
-export type LegacyGeneratePayload = GeneratePayload;
-
-export const GeneratePayloadV1 = z.object({
-  schemaVersion: z.literal(1),
-  prompt: z.string().min(1).max(32_000),
-  history: z.array(ChatMessage).max(200),
-  model: ModelRef,
-  baseUrl: z.string().url().optional(),
-  referenceUrl: z.string().url().optional(),
-  attachments: z.array(LocalInputFile).max(12).default([]),
-  generationId: GenerationId,
-  /** Optional so older clients / tests that don't set it still parse.
-   *  Present in the renderer path so agent stream events can route to
-   *  the right design's chat bubble. */
-  designId: z.string().min(1).optional(),
-  /** Current HTML for this design (if any). Seeded into the agent's
-   *  virtual FS as `index.html` so the text_editor tool can view/edit
-   *  incrementally instead of always rewriting from scratch. */
-  previousHtml: z.string().optional(),
-});
+export const GeneratePayloadV1 = z
+  .object({
+    schemaVersion: z.literal(1),
+    prompt: z.string().min(1).max(32_000),
+    history: z.array(ChatMessage).max(200),
+    model: ModelRef,
+    baseUrl: z.string().url().optional(),
+    referenceUrl: z.string().url().optional(),
+    attachments: z.array(LocalInputFile).max(12).default([]),
+    generationId: GenerationId,
+    /** Required in v0.2: every generation belongs to a workspace-backed design. */
+    designId: z.string().min(1),
+    /** Current design source for this design (if any). Seeded into the
+     *  virtual FS at `App.jsx` so the edit tool can view/edit incrementally
+     *  instead of always rewriting from scratch. */
+    previousSource: z.string().optional(),
+  })
+  .strict();
 export type GeneratePayloadV1 = z.infer<typeof GeneratePayloadV1>;
 
-export const ApplyCommentPayload = z.object({
-  html: z.string().min(1).max(500_000),
-  comment: z.string().min(1).max(4_000),
-  selection: SelectedElement,
-  model: ModelRef.optional(),
-  referenceUrl: z.string().url().optional(),
-  attachments: z.array(LocalInputFile).max(12).default([]),
-});
+export const ApplyCommentPayload = z
+  .object({
+    designId: z.string().min(1),
+    artifactSource: z.string().min(1).max(500_000),
+    comment: z.string().min(1).max(4_000),
+    selection: SelectedElement,
+    generationId: GenerationId,
+    model: ModelRef.optional(),
+    referenceUrl: z.string().url().optional(),
+    attachments: z.array(LocalInputFile).max(12).default([]),
+  })
+  .strict();
 export type ApplyCommentPayload = z.infer<typeof ApplyCommentPayload>;
 
-export const CancelGenerationPayloadV1 = z.object({
-  schemaVersion: z.literal(1),
-  generationId: GenerationId,
-});
+export const CancelGenerationPayloadV1 = z
+  .object({
+    schemaVersion: z.literal(1),
+    generationId: GenerationId,
+  })
+  .strict();
 export type CancelGenerationPayloadV1 = z.infer<typeof CancelGenerationPayloadV1>;
 
 /**
@@ -220,49 +277,14 @@ export const ProjectDraft = z.object({
 });
 export type ProjectDraft = z.infer<typeof ProjectDraft>;
 
-export class CodesignError extends Error {
-  constructor(
-    message: string,
-    // Accept a known registry code (preferred) or a free-form string (backward compat).
-    public readonly code: CodesignErrorCode | string,
-    options?: { cause?: unknown },
-  ) {
-    super(message, options);
-    this.name = 'CodesignError';
-  }
-}
-
+export type { CanonicalWire } from './base-url';
 export {
-  BUILTIN_PROVIDERS,
-  CHATGPT_CODEX_PROVIDER_ID,
-  ConfigSchema,
-  ConfigV3Schema,
-  IMAGE_GENERATION_SCHEMA_VERSION,
-  PROVIDER_SHORTLIST,
-  ProviderCapabilitiesSchema,
-  ImageGenerationCredentialModeSchema,
-  ImageGenerationOutputFormatSchema,
-  ImageGenerationProviderSchema,
-  ImageGenerationQualitySchema,
-  ImageGenerationSettingsSchema,
-  ImageGenerationSizeSchema,
-  ProviderEntrySchema,
-  ProviderModelDiscoveryModeSchema,
-  ReasoningLevelSchema,
-  SUPPORTED_ONBOARDING_PROVIDERS,
-  SecretRef,
-  STORED_DESIGN_SYSTEM_SCHEMA_VERSION,
-  StoredDesignSystem,
-  WireApiSchema,
-  defaultProviderCapabilities,
-  detectWireFromBaseUrl,
-  hydrateConfig,
-  isSupportedOnboardingProvider,
-  migrateLegacyToV3,
-  parseConfigFlexible,
-  resolveProviderCapabilities,
-  toPersistedV3,
-} from './config';
+  canonicalBaseUrl,
+  ensureVersionedBase,
+  modelsEndpointUrl,
+  stripInferenceEndpointSuffix,
+} from './base-url';
+export { CodesignError } from './codesign-error';
 export type {
   Config,
   ConfigV3,
@@ -278,11 +300,42 @@ export type {
   ProviderModelDiscoveryMode,
   ProviderShortlist,
   ReasoningLevel,
-  ResolvedProviderCapabilities,
   SupportedOnboardingProvider,
   WireApi,
 } from './config';
-
+export {
+  BUILTIN_PROVIDERS,
+  CHATGPT_CODEX_PROVIDER_ID,
+  ConfigSchema,
+  ConfigV3Schema,
+  defaultProviderCapabilities,
+  detectWireFromBaseUrl,
+  hydrateConfig,
+  IMAGE_GENERATION_SCHEMA_VERSION,
+  ImageGenerationCredentialModeSchema,
+  ImageGenerationOutputFormatSchema,
+  ImageGenerationProviderSchema,
+  ImageGenerationQualitySchema,
+  ImageGenerationSettingsSchema,
+  ImageGenerationSizeSchema,
+  isSupportedOnboardingProvider,
+  migrateLegacyToV3,
+  PROVIDER_SHORTLIST,
+  ProviderCapabilitiesSchema,
+  ProviderEntrySchema,
+  ProviderModelDiscoveryModeSchema,
+  parseConfigFlexible,
+  ReasoningLevelSchema,
+  resolveProviderCapabilities,
+  SecretRef,
+  STORED_DESIGN_SYSTEM_SCHEMA_VERSION,
+  StoredDesignSystem,
+  SUPPORTED_ONBOARDING_PROVIDERS,
+  toPersistedV3,
+  WireApiSchema,
+} from './config';
+export type { DesignToken } from './design-token';
+export { DesignTokenSet, DesignTokenV1 } from './design-token';
 export type {
   ClaudeCodeDetectionMeta,
   ClaudeCodeUserType,
@@ -291,39 +344,48 @@ export type {
   GeminiDetectionMeta,
   OpencodeDetectionMeta,
 } from './detection';
-
+export type {
+  DiagnoseContext,
+  DiagnosticCategory,
+  DiagnosticFix,
+  DiagnosticFixKind,
+  DiagnosticHypothesis,
+  DiagnosticSeverity,
+  ErrorCode,
+  GenerateFailureContext,
+} from './diagnostics';
+export { diagnose, diagnoseGenerateFailure } from './diagnostics';
+export type { CodesignErrorCode } from './error-codes';
+export { ERROR_CODE_DESCRIPTIONS, ERROR_CODES } from './error-codes';
+// NOTE: fingerprint.ts imports node:crypto and is intentionally NOT re-exported
+// from this barrel — it's main-process only. Import from
+// '@open-codesign/shared/fingerprint' directly.
+export type { FingerprintInput } from './fingerprint';
+export type { ProxyPresetId } from './proxy-presets';
 export {
+  getPresetById,
   PROXY_PRESET_SCHEMA_VERSION,
   PROXY_PRESETS,
   ProxyPreset,
   ProxyPresetIdSchema,
-  getPresetById,
 } from './proxy-presets';
-export type { ProxyPresetId } from './proxy-presets';
-
+export type {
+  LastDoneStateV1,
+  ResourceManifestEntryV1,
+  ResourceManifestV1,
+  ResourceStateV1,
+  ScaffoldedFileStateV1,
+} from './resource-manifest';
 export {
-  canonicalBaseUrl,
-  ensureVersionedBase,
-  modelsEndpointUrl,
-  stripInferenceEndpointSuffix,
-} from './base-url';
-export type { CanonicalWire } from './base-url';
-
-export { DesignTokenV1, DesignTokenSet } from './design-token';
-export type { DesignToken } from './design-token';
-
-export {
-  ChatMessageKind,
-  ChatMessageRowV1,
-  CommentKind,
-  CommentRect,
-  CommentRowV1,
-  CommentStatus,
-  DesignFileV1,
-  DesignMessageV1,
-  DesignSnapshotV1,
-  DesignV1,
-} from './snapshot';
+  applyToolCallToResourceState,
+  createEmptyResourceState,
+  deriveResourceStateFromChatRows,
+  normalizeResourceState,
+  RESOURCE_MANIFEST_SCHEMA_VERSION,
+  RESOURCE_STATE_SCHEMA_VERSION,
+} from './resource-manifest';
+export type { LoadedSkill } from './skills';
+export { SkillFrontmatterV1 } from './skills';
 export type {
   ChatAppendInput,
   ChatArtifactDeliveredPayload,
@@ -340,30 +402,39 @@ export type {
   DesignFile,
   DesignMessage,
   DesignSnapshot,
+  PreviewMode,
   SnapshotCreateInput,
+  WorkspaceMode,
 } from './snapshot';
-
-export { SkillFrontmatterV1 } from './skills';
-export type { LoadedSkill } from './skills';
-
-export { diagnose, diagnoseGenerateFailure } from './diagnostics';
+export {
+  ChatMessageKind,
+  ChatMessageRowV1,
+  CommentKind,
+  CommentRect,
+  CommentRowV1,
+  CommentStatus,
+  DesignFileV1,
+  DesignMessageV1,
+  DesignSnapshotV1,
+  DesignV1,
+} from './snapshot';
 export type {
-  DiagnosticHypothesis,
-  DiagnosticFix,
-  DiagnoseContext,
-  ErrorCode,
-  GenerateFailureContext,
-} from './diagnostics';
-
-export { ERROR_CODES, ERROR_CODE_DESCRIPTIONS } from './error-codes';
-export type { CodesignErrorCode } from './error-codes';
-// NOTE: fingerprint.ts imports node:crypto and is intentionally NOT re-exported
-// from this barrel — it's main-process only. Import from
-// '@open-codesign/shared/fingerprint' directly.
-export type { FingerprintInput } from './fingerprint';
+  CurrentToolNameV1,
+  ToolManifestEntryV1,
+  ToolManifestIconKeyV1,
+  ToolManifestV1,
+} from './tool-manifest';
+export {
+  CURRENT_TOOL_ORDER,
+  currentToolManifestEntries,
+  getToolManifestEntry,
+  isCurrentToolName,
+  TOOL_MANIFEST_SCHEMA_VERSION,
+  TOOL_MANIFEST_V1,
+} from './tool-manifest';
 
 // ---------------------------------------------------------------------------
-// Diagnostic events (PR3 — main-process diagnostic_events table)
+// Diagnostic events (main-process local design store)
 // ---------------------------------------------------------------------------
 
 export type DiagnosticLevel = 'info' | 'warn' | 'error';
@@ -449,7 +520,7 @@ export interface ListEventsResult {
  * dialog opens purely from in-memory state so Report works even when the
  * DB is unavailable or the event was never persisted.
  *
- * Persistence into `diagnostic_events` is a nice-to-have enhancement that
+ * Persistence into the local diagnostic event store is a nice-to-have enhancement that
  * runs fire-and-forget from `createReportableError`. If it succeeds, the
  * caller patches `persistedEventId` / `persistedFingerprint` onto the
  * in-memory record. Nothing downstream depends on that.
@@ -517,11 +588,18 @@ export interface RecordRendererErrorResult {
   fingerprint: string | null;
 }
 
+export type {
+  EditmodeBlock,
+  EditmodeTokens,
+  EditmodeTokenValue,
+  TokenSchemaEntry,
+  TweakSchema,
+} from './editmode';
 export {
   ensureEditmodeMarkers,
+  normalizeLegacyEditmodeBlock,
   parseEditmodeBlock,
   parseTweakSchema,
   replaceEditmodeBlock,
   replaceTweakSchema,
 } from './editmode';
-export type { EditmodeBlock, TokenSchemaEntry, TweakSchema } from './editmode';

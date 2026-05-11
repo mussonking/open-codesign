@@ -103,10 +103,13 @@
 
   /* Spacing — strict 4-px scale */
   --space-0_5: 2px;
+  --space-0-5: var(--space-0_5);
   --space-1: 4px;
   --space-1_5: 6px;
+  --space-1-5: var(--space-1_5);
   --space-2: 8px;
   --space-2_5: 10px;
+  --space-2-5: var(--space-2_5);
   --space-3: 12px;
   --space-4: 16px;
   --space-5: 20px;
@@ -123,7 +126,7 @@
   --size-input-height: 40px;
 
   /* Titlebar (Electron frameless window) */
-  --size-titlebar-height: 96px;
+  --size-titlebar-height: 72px;
   --size-titlebar-pad-left: 72px; /* clears macOS traffic-light buttons */
 
   /* Chip / file-token max width */
@@ -194,13 +197,13 @@
   --transition-fast: all var(--duration-fast) var(--ease-out);
 }
 
-/* Display headings use Fraunces */
+/* App headings use the product UI sans; reserve Fraunces for explicit brand moments. */
 h1,
 h2,
 h3,
 .display {
-  font-family: var(--font-display);
-  font-weight: 500;
+  font-family: var(--font-sans);
+  font-weight: 600;
 }
 
 /* Monospaced numbers and code */

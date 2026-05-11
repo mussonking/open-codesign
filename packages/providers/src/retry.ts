@@ -22,7 +22,7 @@ import {
 } from '@open-codesign/shared';
 import { normalizeProviderError } from './errors';
 import { looksLikeGatewayMissingMessagesApi } from './gateway-compat';
-import { type GenerateOptions, type GenerateResult, complete } from './index';
+import { complete, type GenerateOptions, type GenerateResult } from './index';
 
 export interface RetryReason {
   attempt: number;
@@ -84,12 +84,76 @@ function classifyByStatus(status: number, err: unknown, wire?: WireApi): RetryDe
   return undefined;
 }
 
+function normalizeErrorText(errorMessage: string): string {
+  let out = '';
+  let inWhitespace = false;
+  for (const ch of errorMessage.toLowerCase()) {
+    if (ch.trim().length === 0) {
+      if (!inWhitespace) out += ' ';
+      inWhitespace = true;
+    } else {
+      out += ch;
+      inWhitespace = false;
+    }
+  }
+  return out;
+}
+
+function includesWord(message: string, word: string): boolean {
+  let index = message.indexOf(word);
+  while (index >= 0) {
+    const before = message[index - 1];
+    const after = message[index + word.length];
+    const beforeOk = before === undefined || !isWordChar(before);
+    const afterOk = after === undefined || !isWordChar(after);
+    if (beforeOk && afterOk) return true;
+    index = message.indexOf(word, index + word.length);
+  }
+  return false;
+}
+
+function isWordChar(ch: string): boolean {
+  const code = ch.charCodeAt(0);
+  return (code >= 97 && code <= 122) || (code >= 48 && code <= 57) || ch === '_';
+}
+
+export function isTransportLevelError(errorMessage: string | undefined): boolean {
+  if (!errorMessage) return false;
+  const message = normalizeErrorText(errorMessage);
+  return (
+    includesWord(message, 'terminated') ||
+    message.includes('premature close') ||
+    message.includes('stream ended') ||
+    message.includes('stream closed') ||
+    message.includes('econnreset')
+  );
+}
+
+export function isProviderAbortedTransportError(errorMessage: string | undefined): boolean {
+  if (!errorMessage) return false;
+  const message = normalizeErrorText(errorMessage);
+  return (
+    (message.includes('fetch failed') && message.includes('aborted')) ||
+    message.includes('request was aborted') ||
+    message.includes('generation aborted by provider') ||
+    message.includes('provider aborted') ||
+    message.includes('upstream aborted') ||
+    message.includes('read timeout') ||
+    message.includes('readtimeout') ||
+    message.includes('connection reset') ||
+    message.includes('socket hang up')
+  );
+}
+
 function classifyByNetwork(err: unknown): RetryDecision | undefined {
   if (err instanceof TypeError) return { retry: true, reason: 'network error' };
   if (!(err instanceof Error)) return undefined;
   const code = (err as Error & { code?: unknown }).code;
   if (typeof code === 'string' && RETRYABLE_NET_CODES.has(code)) {
     return { retry: true, reason: `network error (${code})` };
+  }
+  if (isTransportLevelError(err.message)) {
+    return { retry: true, reason: 'transport-level error (stream terminated)' };
   }
   return undefined;
 }

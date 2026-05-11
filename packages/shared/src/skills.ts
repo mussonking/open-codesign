@@ -4,12 +4,15 @@ export const SkillFrontmatterV1 = z.object({
   schemaVersion: z.literal(1).default(1),
   name: z.string().min(1),
   description: z.string().min(1).max(1536),
+  aliases: z.array(z.string().min(1)).default([]),
+  dependencies: z.array(z.string().min(1)).default([]),
+  validationHints: z.array(z.string().min(1)).default([]),
   trigger: z
     .object({
       providers: z.array(z.string()).default(['*']),
       scope: z.enum(['system', 'prefix']).default('system'),
     })
-    .default({}),
+    .default({ providers: ['*'], scope: 'system' }),
   disable_model_invocation: z.boolean().default(false),
   user_invocable: z.boolean().default(true),
   allowed_tools: z.array(z.string()).optional(),

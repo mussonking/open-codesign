@@ -21,6 +21,10 @@
     "applied": "Applied.",
     "working": "Working"
   },
+  "ask": {
+    "title": "Quick clarification",
+    "submit": "Answer"
+  },
   "toast": {
     "error": {
       "report": "Report"
@@ -38,10 +42,29 @@
     "tokens": "{{count}} tokens"
   },
   "canvas": {
+    "previewTab": "Preview",
     "filesTab": "Files",
     "filesTabEmpty": "No files yet",
     "openInTab": "Open in tab",
     "previewHint": "Thumbnail preview · double-click the file or use Open in tab for full view",
+    "documentPreview": {
+      "previewLabel": "Document preview",
+      "loading": "Preparing document preview…",
+      "unavailable": "Document preview unavailable",
+      "empty": "No extractable text was found for this document.",
+      "thumbnailAlt": "{{name}} preview",
+      "section": {
+        "document": "Document text",
+        "workbook": "Workbook text"
+      },
+      "stats": {
+        "author": "Author",
+        "pages": "Pages",
+        "slides": "Slides",
+        "words": "Words",
+        "worksheets": "Sheets"
+      }
+    },
     "tabsAriaLabel": "Open files",
     "closeTab": "Close {{name}}",
     "files": {
@@ -59,7 +82,7 @@
     "workspace": {
       "sectionTitle": "Workspace",
       "label": "Folder",
-      "default": "Default internal storage",
+      "default": "No workspace bound",
       "choose": "Choose folder",
       "change": "Change",
       "open": "Open folder",
@@ -72,7 +95,60 @@
       "rebindDescription": "This design already has a workspace folder. Choose how to proceed:",
       "rebindCancel": "Cancel",
       "rebindSwitchOnly": "Switch without copying",
-      "rebindSwitchAndCopy": "Switch and copy files"
+      "rebindSwitchAndCopy": "Switch and copy files",
+      "preview": {
+        "label": "Preview",
+        "detect": "Detect",
+        "apply": "Apply preview URL",
+        "reload": "Reload preview",
+        "openConnected": "Open",
+        "openFailed": "Could not open preview",
+        "saveFailed": "Could not update preview",
+        "detectFailed": "Could not detect preview",
+        "detectNone": "No running preview found",
+        "urlLabel": "Preview URL",
+        "urlPlaceholder": "localhost:5173",
+        "urlRequired": "Enter a local preview URL first.",
+        "urlInvalid": "Enter a valid http or https URL.",
+        "actions": {
+          "showOptions": "Show preview options",
+          "hideOptions": "Hide preview options"
+        },
+        "status": {
+          "saved": "Saved",
+          "auto": "Auto"
+        },
+        "mode": {
+          "label": "Mode",
+          "integrated": "Integrated file",
+          "integratedShort": "Integrated",
+          "connectedUrl": "Connected URL",
+          "connectedUrlShort": "Connected",
+          "externalApp": "External app",
+          "externalAppShort": "External",
+          "off": "Off",
+          "offShort": "Off"
+        },
+        "summary": {
+          "detecting": "Looking for a running local preview.",
+          "integrated": "Rendering workspace files inside Open CoDesign.",
+          "integratedBlocked": "This workspace looks like an app; use its own dev server for preview.",
+          "connected": "Previewing {{url}}.",
+          "waitingUrl": "Enter the running local preview URL.",
+          "external": "Use the app's own preview window.",
+          "externalWithUrl": "External preview configured at {{url}}.",
+          "off": "Preview is off for this workspace."
+        },
+        "hint": {
+          "appWorkspace": "App workspaces usually preview best in their own dev server or app window.",
+          "simpleWorkspace": "Integrated preview renders App.jsx or index.html inside Open CoDesign."
+        },
+        "placeholder": {
+          "off": "Preview is off for this workspace.",
+          "external": "This workspace is meant to be previewed in its own app window or browser.",
+          "devServerRequired": "This file is an app entry. Start its dev server, then use Detect or Connected URL for preview."
+        }
+      }
     },
     "rail": {
       "title": "Files",
@@ -104,7 +180,13 @@
     "commentModeHint": "Click any element to comment",
     "runtimeError": "Preview runtime error",
     "dismissErrors": "Dismiss preview errors",
-    "zoom": "Zoom"
+    "zoom": "Zoom",
+    "zoomFit": "Fit",
+    "viewport": {
+      "desktop": "Desktop preview",
+      "tablet": "Tablet preview",
+      "mobile": "Mobile preview"
+    }
   },
   "tweaks": {
     "title": "Tweaks",
@@ -115,6 +197,31 @@
     "swatchAria": "{{key}} color",
     "emptyTitle": "No tweakable tokens",
     "emptyHint": "The agent hasn't declared an EDITMODE block yet. Future generations will expose design tokens here."
+  },
+  "inspector": {
+    "title": "Inspector",
+    "close": "Close inspector",
+    "panels": {
+      "tweaks": "Tweaks",
+      "comments": "Comments",
+      "selection": "Selection",
+      "run": "Run"
+    },
+    "empty": {
+      "tweaks": "No preview is available to tweak yet.",
+      "selection": "Select an element in comment mode to inspect it."
+    },
+    "comments": {
+      "enterMode": "Comment on preview"
+    },
+    "selection": {
+      "target": "Target"
+    },
+    "run": {
+      "status": "Status",
+      "id": "Run ID",
+      "tokens": "Tokens"
+    }
   },
   "chat": {
     "placeholder": "Describe what to design…",
@@ -165,6 +272,34 @@
       },
       "working": {
         "title": "Working"
+      },
+      "activity": {
+        "working": "Working",
+        "activity": "Activity",
+        "needsAttention": "Needs attention",
+        "oneStep": "1 step",
+        "stepCount": "{{count}} steps",
+        "preparingRun": "Preparing run",
+        "loadedDesignRules": "Loaded design rules",
+        "loadingDesignRules": "Loading design rules",
+        "planProgress": "Plan progress",
+        "checkedWorkspace": "Checked workspace",
+        "checkingWorkspace": "Checking workspace",
+        "workspaceCheckFailed": "Workspace check failed",
+        "titleUpdateFailed": "Title update failed",
+        "finalCheckFailed": "Final check failed",
+        "readFile": "Read file",
+        "createdFile": "Created file",
+        "editedFile": "Edited file",
+        "createdAndEdited": "Created and edited",
+        "previewing": "Previewing",
+        "previewed": "Previewed",
+        "previewFailed": "Preview failed",
+        "updatingMemory": "Updating memory",
+        "createdMemory": "Created memory",
+        "updatedMemory": "Updated memory",
+        "legacyTool": "Legacy tool",
+        "genericTool": "Tool"
       }
     },
     "comments": {
@@ -177,7 +312,9 @@
     "tabs": {
       "models": "Models",
       "images": "Image API",
+      "memory": "Memory",
       "appearance": "Appearance",
+      "workspace": "Workspace & Files",
       "storage": "Storage",
       "diagnostics": "Diagnostics",
       "advanced": "Advanced"
@@ -189,6 +326,7 @@
       "hint": "When enabled, the agent can invoke generate_image_asset during a run.",
       "enabled": "Enable image generation assist",
       "provider": "Provider",
+      "chatgptSubscription": "ChatGPT subscription",
       "credentials": "Credentials",
       "inherit": "Inherit from model provider",
       "customKey": "Use a separate key",
@@ -201,6 +339,7 @@
       "status": {
         "ready": "Ready",
         "needsKey": "Needs API key",
+        "needsChatgptLogin": "Needs ChatGPT sign-in",
         "disabled": "Disabled"
       },
       "toast": {
@@ -208,6 +347,29 @@
         "saved": "Image generation settings saved",
         "saveFailed": "Failed to save image generation settings"
       }
+    },
+    "memory": {
+      "userFile": "User memory file",
+      "open": "Open file",
+      "updateNow": "Update now",
+      "enabled": "Enable memory",
+      "enabledHint": "Use workspace MEMORY.md, global user memory, and compact session briefs during generation.",
+      "workspaceAutoUpdate": "Workspace memory auto-update",
+      "workspaceAutoUpdateHint": "Update MEMORY.md after successful generations.",
+      "userAutoUpdate": "User memory auto-update",
+      "userAutoUpdateHint": "Learn cross-workspace design preferences from candidate evidence. Off by default.",
+      "preview": "User Design Memory",
+      "save": "Save",
+      "clearCandidates": "Clear candidates",
+      "loadFailed": "Failed to load memory",
+      "saved": "User memory saved",
+      "saveFailed": "Failed to save memory",
+      "openFailed": "Could not open memory file",
+      "updated": "User memory updated",
+      "noCandidates": "No pending candidates",
+      "updateFailed": "Could not update user memory",
+      "candidatesCleared": "Pending candidates cleared",
+      "clearFailed": "Could not clear candidates"
     },
     "shell": {
       "back": "Workspace",
@@ -225,7 +387,7 @@
       "sectionTitle": "API Providers",
       "chatgptLogin": {
         "title": "Sign in with ChatGPT subscription",
-        "description": "Use your ChatGPT Plus / Pro / Team plan quota to call Codex models (gpt-5.3-codex and friends) — no API key needed.",
+        "description": "Use your ChatGPT Plus / Pro / Team plan quota to call Codex models (gpt-5.5 and friends) — no API key needed.",
         "signIn": "Sign in with ChatGPT",
         "inProgress": "Browser opened. Complete the authorization and we'll return automatically…",
         "loggedInBadge": "Signed in with ChatGPT",
@@ -242,6 +404,7 @@
       "empty": "No providers configured yet. Add one to start generating.",
       "active": "Active",
       "activeNotInList": "(active, not in provider list)",
+      "noModel": "No model selected",
       "decryptionFailed": "Decryption failed",
       "setActive": "Set active",
       "reEnterKey": "Re-enter key",
@@ -378,6 +541,7 @@
       "reasoning": {
         "label": "Reasoning depth",
         "default": "Default (auto)",
+        "off": "Off",
         "minimal": "Minimal",
         "low": "Low",
         "medium": "Medium",
@@ -397,7 +561,8 @@
       "languageLoadFailed": "Failed to load language",
       "langEn": "English",
       "langZhCN": "中文 (简体)",
-      "langPtBR": "Português (BR)"
+      "langPtBR": "Português (BR)",
+      "langEs": "Español"
     },
     "language": {
       "label": "Language",
@@ -416,6 +581,7 @@
       "data": "Data directory",
       "change": "Change",
       "restartHint": "Choose where open-codesign stores config, logs, and local design data. Changes are saved permanently and take effect after restarting the app.",
+      "workspaceHint": "Design workspace folders are managed per design from the Files panel. Changing these storage paths does not move or rebind existing workspace files.",
       "locationSavedToast": "Storage location saved. Restart the app to apply it.",
       "locationSaveFailed": "Could not save storage location",
       "onboardingTitle": "Onboarding",
@@ -426,9 +592,12 @@
       "pathsLoadFailed": "Failed to load app paths",
       "openFolderFailed": "Could not open folder",
       "onboardingResetToast": "Onboarding reset. Restart the app to re-run setup.",
+      "templatesTitle": "Template files",
+      "templatesHint": "Open the bundled starter and template folder used by scaffolds and design resources.",
       "diagnosticsTitle": "Diagnostics",
       "diagnosticsHint": "Open the log folder to inspect logs, or export a redacted bundle for bug reports.",
       "openLogFolder": "Open log folder",
+      "openTemplatesFolder": "Open templates folder",
       "exportDiagnostics": "Export diagnostics",
       "diagnosticsExported": "Exported to {{path}}",
       "diagnosticsExportFailed": "Could not export diagnostics"
@@ -613,7 +782,7 @@
       },
       "pptx": {
         "label": "PPTX",
-        "hint": "Editable slides; one per <section>"
+        "hint": "High-fidelity slides; one per <section>"
       },
       "zip": {
         "label": "ZIP bundle",
@@ -768,6 +937,7 @@
     "exporterNotReady": "Exporter is still loading. Try again in a moment.",
     "rendererDisconnected": "Renderer is not connected to the main process.",
     "onboardingIncomplete": "Onboarding is not complete.",
+    "designSystemRequiresOnboarding": "Complete onboarding before linking a design system.",
     "providerMissingKey": "The active provider \"{{provider}}\" has no API key. Open Settings to add one.",
     "modelListFailed": "Could not load model list.",
     "unknown": "Unknown error",
@@ -781,6 +951,7 @@
       "currentLabel": "Current design",
       "menuLabel": "Switch design",
       "newDesign": "New design",
+      "newConversationForWorkspace": "New conversation for this workspace",
       "renameCurrent": "Rename",
       "viewAll": "View all designs…",
       "recent": "Recent",
@@ -830,6 +1001,7 @@
       "switchFailed": "Could not switch design",
       "switchBlockedGenerating": "Wait for generation to finish before switching",
       "busyGenerating": "Wait for the current generation to finish, then try again",
+      "workspaceBusyGenerating": "A generation is already running for this workspace",
       "renameFailed": "Could not rename the design",
       "duplicated": "Duplicated as \"{{name}}\"",
       "duplicateFailed": "Could not duplicate the design",
@@ -856,9 +1028,20 @@
       "timedOut": "Request timed out — check firewall or VPN.",
       "corsError": "CORS error (should not happen in main process). This is a bug.",
       "sslError": "SSL / certificate error (self-signed cert on relay?).",
+      "endpointNotFound": "The endpoint path exists in the Base URL but the provider did not expose this route.",
       "gatewayIncompatible": "The gateway accepted the connection but does not implement this provider's API. Try switching wire (e.g. openai-chat).",
+      "gatewayWafBlocked": "The gateway or reverse proxy blocked the generation request before it reached the model. Test Connection can still pass because it only probes the /models endpoint.",
       "openaiResponsesMisconfigured": "The endpoint rejected the request shape. The wire may be wrong — try switching to openai-chat.",
+      "unsupportedRole": "The endpoint rejected the role format sent to the model. This is usually a wire or model-policy mismatch.",
+      "reasoningPolicy": "The endpoint rejected reasoning metadata for this model. Lower the reasoning depth and try again.",
+      "modelIdShape": "The selected model id includes a provider prefix this endpoint does not accept.",
+      "generationTimeout": "The generation reached the configured timeout before the model finished.",
       "relayStreamingBug": "The gateway may mishandle OpenAI Responses API SSE events (older sub2api / claude2api / anyrouter builds cut the stream short).",
+      "transportInterrupted": "The provider connection ended before the turn completed. This is usually a gateway timeout or network interruption.",
+      "referenceUrlInvalid": "The reference URL is invalid or not supported.",
+      "referenceUrlFetchFailed": "The reference URL could not be fetched.",
+      "referenceUrlTimeout": "Fetching the reference URL timed out.",
+      "referenceUrlTooLarge": "The reference URL content is too large to include.",
       "serverError": "Upstream server error. May be transient — try again.",
       "unknown": "Unknown error — check the full log for details."
     },
@@ -868,11 +1051,17 @@
       "addCreditsGeneric": "Check your provider's billing page",
       "addV1": "Add /v1",
       "waitAndRetry": "Wait and retry",
+      "adjustGenerationTimeout": "Adjust generation timeout",
       "checkNetwork": "Check network / VPN",
       "checkVpn": "Check VPN / firewall",
       "reportBug": "Report this bug",
       "disableTls": "Disable TLS verify",
       "switchWire": "Switch wire in Settings",
+      "setReasoningMinimal": "Set reasoning to minimal",
+      "disableReasoning": "Turn reasoning off",
+      "normalizeModelId": "Remove model prefix",
+      "checkReferenceUrl": "Check reference URL",
+      "gatewayWafBlocked": "Check proxy allowlist / headers",
       "relayStreamingBug": "Upgrade the relay, switch wire to openai-chat, or use api.openai.com directly"
     },
     "applyFix": "Apply this fix",
@@ -1007,14 +1196,14 @@
     }
   },
   "starterPrompts": {
-    "landing": "Build a landing page for an AI startup. Hero with a strong tagline, 3 feature cards, social proof section, CTA. Editorial typography, generous whitespace.",
-    "pitch": "Generate the first 3 slides of a pitch deck for a fintech startup: title slide, problem, solution. 16:9 format, navy palette, one orange accent.",
-    "mobile": "Design a 3-screen mobile app onboarding flow inside a phone frame: welcome, permissions, first action. Soft mint palette.",
-    "dashboard": "Build an analytics dashboard with: MRR trend line chart, pipeline stacked bars, top accounts table, and forecast gauge. Dark theme, teal + amber accents, plausible mock data.",
-    "email": "Design a transactional welcome email for a SaaS product. Single column, 600px wide, table-based. Logo header, greeting, 3 onboarding steps, CTA button, footer.",
-    "portfolio": "Design a photographer portfolio with masonry image grid using CSS gradient placeholders. Dark background, category filter pills, hover overlay with title and camera settings.",
-    "casestudy": "Create a one-page customer case study for a B2B fintech. Hero with client name, three large metrics with deltas, a CFO pull quote, a three-step 'How we did it' section, and a logo strip. Dark theme, serif headings, monospace numerals.",
-    "animation": "Build a showcase page with six organic CSS loading animations. Each in its own card: blob morph, leaf sway, ink drop, breathing circle, soft pulse, ribbon weave. Warm cream background, muted pastels, pure CSS/SVG only."
+    "landing": "Build a polished landing page for an AI startup aimed at small product teams. Include a first-viewport hero with a clear product signal, strong tagline, subhead, primary/secondary CTAs, feature section, social proof, pricing teaser, FAQ, and footer. Use editorial typography, generous whitespace, real product-oriented copy, responsive layout, and no external stock or placeholder images.",
+    "pitch": "Generate the first 3 slides of a 16:9 pitch deck for a fintech startup: title slide, problem slide, and solution slide. Use navy as the base, one orange accent, consistent footer/page numbers, simple charts or diagrams built in SVG/CSS, concise investor-ready copy, and fixed slide-safe spacing for export.",
+    "mobile": "Design a 3-screen mobile app onboarding flow inside phone frames: welcome, permissions, and first action. Show realistic app copy, progress indicators, primary/secondary buttons, permission state, and a final success hint. Use a soft mint palette, generous touch targets, accessible contrast, and no external icons or images.",
+    "dashboard": "Build an analytics dashboard for a SaaS team with MRR trend line chart, pipeline stacked bars, top accounts table, forecast gauge, date-range filters, and an empty or warning state. Use a dense dark theme, teal and amber accents, plausible mock data, accessible tables, and responsive card reflow.",
+    "email": "Design a transactional welcome email for a SaaS product. Use a 600px single-column table-based layout with logo header, greeting, 3 onboarding steps, primary CTA, fallback text link, and compliance footer. Keep it mobile-safe, use email-compatible styling, realistic copy, and no external images or scripts.",
+    "portfolio": "Design a photographer portfolio with a masonry image grid using CSS gradient or shape placeholders instead of external photos. Include wordmark nav, category filter pills, hover overlay with project title and camera settings, lightbox selected state, availability footer, dark background, and responsive two/three/four-column behavior.",
+    "casestudy": "Create a print-ready one-page customer case study for a B2B fintech. Include client hero, business context, three large before/after metrics with deltas, a CFO pull quote, three-step How we did it section, process diagram, and logo strip. Use dark theme, serif headings, monospace numerals, realistic content, and no lorem ipsum.",
+    "animation": "Build a showcase page with six organic CSS/SVG loading animations. Each loader sits in its own labeled card with a usage note, accessible status text, active/paused state, and motion polish: blob morph, leaf sway, ink drop, breathing circle, soft pulse, ribbon weave. Use warm cream background, muted pastels, responsive wrapping, and no external assets."
   },
   "hub": {
     "newDesign": "New design",
@@ -1023,9 +1212,9 @@
     "backToHub": "All designs",
     "tabs": {
       "recent": "Recent",
-      "your": "Your designs",
+      "all": "All designs",
       "examples": "Examples",
-      "designSystems": "Design systems"
+      "resources": "Resources"
     },
     "recent": {
       "title": "Recent",
@@ -1118,6 +1307,10 @@
     "INPUT_EMPTY_HTML": "Existing HTML is required for this operation.",
     "INPUT_UNSUPPORTED_MODE": "This generation mode is not supported.",
     "GENERATION_TIMEOUT": "Generation timed out. Try a shorter prompt or increase the timeout in Settings.",
+    "GENERATION_INCOMPLETE": "The agent stopped before completing verification. Continue the run to finish the workspace artifact.",
+    "WORKSPACE_MISSING": "This design has no workspace bound. Reopen or recreate the design.",
+    "ARTIFACT_PROTOCOL_INVALID": "The generated artifact did not follow the required protocol.",
+    "TOOL_EXECUTION_FAILED": "A design tool failed while running. Details are in the log.",
     "CONFIG_READ_FAILED": "Failed to read configuration file. Check file permissions.",
     "CONFIG_PARSE_FAILED": "Configuration file could not be parsed. It may be corrupt.",
     "CONFIG_SCHEMA_INVALID": "Configuration file has an unrecognised format. Please reconfigure.",

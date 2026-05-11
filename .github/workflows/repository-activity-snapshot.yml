@@ -1,0 +1,41 @@
+name: Repository Activity Snapshot
+
+on:
+  schedule:
+    - cron: '23 18 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    if: github.event.repository.visibility == 'public'
+    env:
+      ACTIVITY_SNAPSHOT_TOKEN: ${{ secrets.ACTIVITY_SNAPSHOT_TOKEN }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Explain missing token
+        if: env.ACTIVITY_SNAPSHOT_TOKEN == ''
+        run: |
+          echo "::notice::Set ACTIVITY_SNAPSHOT_TOKEN to a fine-grained PAT with Administration: read on this repo to snapshot aggregate repository activity. GitHub only exposes recent aggregate data for these endpoints."
+
+      - name: Collect aggregate repository activity
+        if: env.ACTIVITY_SNAPSHOT_TOKEN != ''
+        env:
+          GITHUB_TOKEN: ${{ env.ACTIVITY_SNAPSHOT_TOKEN }}
+          ACTIVITY_SNAPSHOT_DIR: repository-activity
+        run: node .github/scripts/repository-activity-snapshot.mjs
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: env.ACTIVITY_SNAPSHOT_TOKEN != ''
+        with:
+          name: repository-activity-snapshot-${{ github.run_id }}
+          path: repository-activity/*.json
+          retention-days: 90

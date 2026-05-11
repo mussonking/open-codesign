@@ -1,5 +1,13 @@
 import { initI18n } from '@open-codesign/i18n';
-import type { OnboardingState, SelectedElement } from '@open-codesign/shared';
+import type {
+  ChatAppendInput,
+  CommentCreateInput,
+  CommentRow,
+  CommentUpdateInput,
+  LocalInputFile,
+  OnboardingState,
+  SelectedElement,
+} from '@open-codesign/shared';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   coerceUsageSnapshot,
@@ -17,6 +25,16 @@ const READY_CONFIG: OnboardingState = {
 };
 
 const initialState = useCodesignStore.getState();
+const DEFAULT_DESIGN = {
+  schemaVersion: 1 as const,
+  id: 'design-default',
+  name: 'Existing design',
+  createdAt: '2024-01-01T00:00:00.000Z',
+  updatedAt: '2024-01-01T00:00:00.000Z',
+  thumbnailText: null,
+  deletedAt: null,
+  workspacePath: '/tmp/open-codesign-test-workspace',
+};
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -31,9 +49,12 @@ function deferred<T>() {
 function resetStore() {
   useCodesignStore.setState({
     ...initialState,
-    previewHtml: null,
+    previewSource: null,
+    generationByDesign: {},
     isGenerating: false,
     activeGenerationId: null,
+    generatingDesignId: null,
+    generationStage: 'idle',
     errorMessage: null,
     lastError: null,
     config: READY_CONFIG,
@@ -42,6 +63,66 @@ function resetStore() {
     iframeErrors: [],
     toasts: [],
   });
+}
+
+function setWorkspaceBackedDesign(id = DEFAULT_DESIGN.id) {
+  useCodesignStore.setState({
+    designs: [{ ...DEFAULT_DESIGN, id }],
+    designsLoaded: true,
+    currentDesignId: id,
+  });
+}
+
+function mockSnapshotsApi() {
+  return {
+    list: vi.fn(async () => []),
+    listDesigns: vi.fn(async () => useCodesignStore.getState().designs),
+    setThumbnail: vi.fn(async (id: string, thumbnailText: string | null) => ({
+      ...DEFAULT_DESIGN,
+      id,
+      thumbnailText,
+    })),
+    create: vi.fn(async (input: { designId: string; artifactSource: string }) => ({
+      schemaVersion: 1 as const,
+      id: `snapshot-${input.designId}`,
+      designId: input.designId,
+      parentId: null,
+      type: 'initial' as const,
+      prompt: null,
+      artifactType: 'html' as const,
+      artifactSource: input.artifactSource,
+      createdAt: new Date().toISOString(),
+      message: null,
+    })),
+  };
+}
+
+function mockChatApi() {
+  return {
+    seedFromSnapshots: vi.fn(async (_designId: string) => {}),
+    list: vi.fn(async (_designId: string) => []),
+    append: vi.fn(async (input: { designId: string; kind: string; payload: unknown }) => ({
+      id: `${input.kind}-1`,
+      designId: input.designId,
+      kind: input.kind,
+      payload: input.payload,
+      snapshotId: null,
+      createdAt: new Date().toISOString(),
+      seq: 1,
+    })),
+    updateToolStatus: vi.fn(async () => {}),
+    onAgentEvent: vi.fn(() => () => {}),
+  };
+}
+
+function mockCommentsApi() {
+  return {
+    list: vi.fn(async (_designId: string) => []),
+    add: vi.fn(async (_input: CommentCreateInput) => null as CommentRow | null),
+    update: vi.fn(async (_designId: string, _id: string, _patch: CommentUpdateInput) => null),
+    remove: vi.fn(async (_designId: string, _id: string) => ({ removed: false })),
+    markApplied: vi.fn(async (_designId: string, _ids: string[], _snapshotId: string) => []),
+  };
 }
 
 beforeEach(() => {
@@ -65,9 +146,12 @@ describe('useCodesignStore iframe error handling', () => {
     vi.stubGlobal('window', {
       codesign: {
         generate,
+        chat: mockChatApi(),
+        snapshots: mockSnapshotsApi(),
       },
     });
 
+    setWorkspaceBackedDesign();
     useCodesignStore.setState({ iframeErrors: ['old iframe error'] });
 
     const sendPromise = useCodesignStore.getState().sendPrompt({ prompt: 'make a landing page' });
@@ -115,9 +199,191 @@ describe('useCodesignStore iframe error handling', () => {
   });
 });
 
+describe('useCodesignStore prompt attachments', () => {
+  it('moves sent attachments into the user chat payload and clears the draft files', async () => {
+    const attachments: LocalInputFile[] = [
+      { path: 'references/screenshot.png', name: 'screenshot.png', size: 42_000 },
+    ];
+    const generatedPayloads: unknown[] = [];
+    const generate = vi.fn((payload: unknown) => {
+      generatedPayloads.push(payload);
+      return Promise.resolve({
+        artifacts: [{ content: '<html>ok</html>' }],
+        message: 'Done.',
+      });
+    });
+    const appended: ChatAppendInput[] = [];
+    const append = vi.fn(async (input: ChatAppendInput) => ({
+      schemaVersion: 1 as const,
+      id: `${input.kind}-1`,
+      designId: input.designId,
+      seq: appended.push(input) - 1,
+      kind: input.kind,
+      payload: input.payload,
+      snapshotId: input.snapshotId ?? null,
+      createdAt: new Date().toISOString(),
+    }));
+
+    vi.stubGlobal('window', {
+      codesign: {
+        generate,
+        chat: { ...mockChatApi(), append },
+        comments: mockCommentsApi(),
+        snapshots: mockSnapshotsApi(),
+      },
+      setTimeout,
+    });
+
+    setWorkspaceBackedDesign();
+    useCodesignStore.setState({ inputFiles: attachments });
+
+    await useCodesignStore.getState().sendPrompt({ prompt: 'Use this screenshot' });
+
+    expect(generatedPayloads[0]).toMatchObject({ attachments });
+    const appendedUserPayload = appended.find(
+      (input) =>
+        input.kind === 'user' &&
+        typeof input.payload === 'object' &&
+        input.payload !== null &&
+        'attachments' in input.payload,
+    )?.payload;
+    expect(appendedUserPayload).toEqual({
+      text: 'Use this screenshot',
+      attachments,
+    });
+    expect(useCodesignStore.getState().inputFiles).toEqual([]);
+  });
+});
+
+describe('useCodesignStore streaming assistant text', () => {
+  it('keeps streaming assistant text isolated per design', () => {
+    const { setStreamingAssistantText } = useCodesignStore.getState();
+
+    setStreamingAssistantText({ designId: 'design-a', text: 'A is drafting' });
+    setStreamingAssistantText({ designId: 'design-b', text: 'B is editing' });
+
+    expect(useCodesignStore.getState().streamingAssistantTextByDesign).toMatchObject({
+      'design-a': 'A is drafting',
+      'design-b': 'B is editing',
+    });
+
+    setStreamingAssistantText({ designId: 'design-a', text: '' });
+
+    expect(useCodesignStore.getState().streamingAssistantTextByDesign).toEqual({
+      'design-b': 'B is editing',
+    });
+    expect(useCodesignStore.getState().streamingAssistantText?.designId).toBe('design-b');
+  });
+});
+
+describe('useCodesignStore inline comments', () => {
+  it('routes inline comment edits through the main generate path with scoped prompt context', async () => {
+    const generatePayloads: Array<Record<string, unknown>> = [];
+    const generate = vi.fn((payload: Record<string, unknown>) => {
+      generatePayloads.push(payload);
+      return Promise.resolve({
+        artifacts: [{ content: '<html>ok</html>' }],
+        message: 'Applied.',
+      });
+    });
+
+    vi.stubGlobal('window', {
+      codesign: {
+        generate,
+        chat: mockChatApi(),
+        comments: mockCommentsApi(),
+        snapshots: mockSnapshotsApi(),
+      },
+      setTimeout,
+    });
+
+    setWorkspaceBackedDesign();
+    useCodesignStore.setState({
+      previewSource:
+        'function App(){ return <button id="cta">Buy</button>; }\nReactDOM.createRoot(document.getElementById("root")).render(<App/>);',
+      selectedElement: {
+        selector: '#cta',
+        tag: 'button',
+        outerHTML: '<button id="cta">Buy</button>',
+        rect: { top: 0, left: 0, width: 120, height: 40 },
+      },
+    });
+
+    await useCodesignStore.getState().applyInlineComment('make it bolder');
+
+    expect(generate).toHaveBeenCalledOnce();
+    const generatedPrompt = String(generatePayloads[0]?.['prompt'] ?? '');
+    expect(generatedPrompt).toContain('Edit 1 target');
+    expect(generatedPrompt).toContain('#cta');
+    expect(generatedPrompt).toContain('make it bolder');
+    expect(generatedPrompt).toContain('apply every edit below');
+    expect(useCodesignStore.getState().selectedElement).toBeNull();
+  });
+});
+
 describe('useCodesignStore generation cancellation', () => {
   beforeAll(async () => {
     await initI18n('en');
+  });
+
+  it('renames default designs immediately before model title generation settles', async () => {
+    const designId = 'design-auto-title';
+    let designRow = {
+      ...DEFAULT_DESIGN,
+      id: designId,
+      name: 'Untitled design 1',
+      workspacePath: '/tmp/open-codesign-auto-title',
+    };
+    const generateTask = deferred<{ artifacts: Array<{ content: string }>; message: string }>();
+    const titleTask = deferred<string>();
+    const generate = vi.fn(() => generateTask.promise);
+    const generateTitle = vi.fn(() => titleTask.promise);
+    const renameDesign = vi.fn(async (_id: string, name: string) => {
+      designRow = { ...designRow, name };
+      return designRow;
+    });
+    const listDesigns = vi.fn(async () => [designRow]);
+
+    vi.stubGlobal('window', {
+      codesign: {
+        generate,
+        generateTitle,
+        chat: mockChatApi(),
+        snapshots: {
+          ...mockSnapshotsApi(),
+          listDesigns,
+          renameDesign,
+        },
+      },
+      setTimeout,
+    });
+
+    useCodesignStore.setState({
+      designs: [designRow],
+      designsLoaded: true,
+      currentDesignId: designId,
+    });
+
+    const run = useCodesignStore.getState().sendPrompt({
+      prompt: '设计 Apple Watch 跑步教练屏幕',
+    });
+
+    await vi.waitFor(() =>
+      expect(renameDesign).toHaveBeenCalledWith(designId, '设计 Apple Watch 跑步教练屏幕', {
+        renameWorkspace: false,
+      }),
+    );
+    expect(generateTitle).toHaveBeenCalledOnce();
+
+    titleTask.resolve('Apple Watch 跑步教练');
+    await vi.waitFor(() =>
+      expect(renameDesign).toHaveBeenCalledWith(designId, 'Apple Watch 跑步教练', {
+        renameWorkspace: false,
+      }),
+    );
+
+    generateTask.resolve({ artifacts: [{ content: '<html></html>' }], message: 'Done.' });
+    await run;
   });
 
   it('ignores stale completions from a cancelled generation after a resubmit', async () => {
@@ -137,13 +403,17 @@ describe('useCodesignStore generation cancellation', () => {
       codesign: {
         generate,
         cancelGeneration,
+        chat: mockChatApi(),
+        snapshots: mockSnapshotsApi(),
       },
       setTimeout,
     });
 
+    setWorkspaceBackedDesign();
     const firstRun = useCodesignStore.getState().sendPrompt({ prompt: 'first prompt' });
     const firstId = useCodesignStore.getState().activeGenerationId;
     if (!firstId) throw new Error('expected first generation id');
+    await vi.waitFor(() => expect(pendingById.has(firstId)).toBe(true));
 
     useCodesignStore.getState().cancelGeneration();
 
@@ -154,6 +424,7 @@ describe('useCodesignStore generation cancellation', () => {
     const secondId = useCodesignStore.getState().activeGenerationId;
     if (!secondId) throw new Error('expected second generation id');
     expect(secondId).not.toBe(firstId);
+    await vi.waitFor(() => expect(pendingById.has(secondId)).toBe(true));
 
     pendingById.get(firstId)?.resolve({
       artifacts: [{ content: '<html>old</html>' }],
@@ -163,7 +434,7 @@ describe('useCodesignStore generation cancellation', () => {
 
     expect(useCodesignStore.getState().activeGenerationId).toBe(secondId);
     expect(useCodesignStore.getState().isGenerating).toBe(true);
-    expect(useCodesignStore.getState().previewHtml).toBeNull();
+    expect(useCodesignStore.getState().previewSource).toBeNull();
 
     pendingById.get(secondId)?.resolve({
       artifacts: [{ content: '<html>fresh</html>' }],
@@ -172,14 +443,57 @@ describe('useCodesignStore generation cancellation', () => {
     await secondRun;
 
     expect(cancelGeneration).toHaveBeenCalledWith(firstId);
-    expect(useCodesignStore.getState().previewHtml).toBe('<html>fresh</html>');
+    expect(useCodesignStore.getState().previewSource).toBe('<html>fresh</html>');
     expect(useCodesignStore.getState().isGenerating).toBe(false);
+  });
+
+  it('refreshes main-process generation status before accepting a resubmit for the same design', async () => {
+    const generate = vi.fn(async () => ({
+      artifacts: [{ content: '<html></html>' }],
+      message: 'ok',
+    }));
+    const generationStatus = vi.fn(async () => ({
+      schemaVersion: 1 as const,
+      running: [
+        { designId: DEFAULT_DESIGN.id, generationId: 'gen-main-still-running', startedAt: 42 },
+      ],
+    }));
+
+    vi.stubGlobal('window', {
+      codesign: {
+        generate,
+        generationStatus,
+        chat: mockChatApi(),
+        snapshots: mockSnapshotsApi(),
+      },
+      setTimeout,
+    });
+
+    setWorkspaceBackedDesign();
+
+    await useCodesignStore.getState().sendPrompt({ prompt: 'continue this design' });
+
+    expect(generationStatus).toHaveBeenCalledOnce();
+    expect(generate).not.toHaveBeenCalled();
+    expect(useCodesignStore.getState().generationByDesign[DEFAULT_DESIGN.id]).toEqual({
+      generationId: 'gen-main-still-running',
+      startedAt: 42,
+      stage: 'thinking',
+    });
   });
 
   it('sets errorMessage and pushes a toast when window.codesign is missing during cancel', () => {
     vi.stubGlobal('window', { setTimeout });
 
-    useCodesignStore.setState({ activeGenerationId: 'gen-123' });
+    useCodesignStore.setState({
+      currentDesignId: DEFAULT_DESIGN.id,
+      generationByDesign: {
+        [DEFAULT_DESIGN.id]: { generationId: 'gen-123', stage: 'streaming' },
+      },
+      isGenerating: true,
+      activeGenerationId: 'gen-123',
+      generatingDesignId: DEFAULT_DESIGN.id,
+    });
 
     useCodesignStore.getState().cancelGeneration();
 
@@ -207,10 +521,12 @@ describe('useCodesignStore generation cancellation', () => {
       codesign: {
         generate,
         cancelGeneration: vi.fn(() => Promise.resolve()),
+        chat: mockChatApi(),
       },
       setTimeout,
     });
 
+    setWorkspaceBackedDesign();
     const run = useCodesignStore.getState().sendPrompt({ prompt: 'first prompt' });
     const generationId = useCodesignStore.getState().activeGenerationId;
     if (!generationId) throw new Error('expected generation id');
@@ -227,8 +543,8 @@ describe('useCodesignStore generation cancellation', () => {
     expect(state.lastError).toBe('Upstream proxy aborted the response');
     expect(state.toasts.at(-1)).toMatchObject({
       variant: 'error',
-      description: 'Upstream proxy aborted the response',
     });
+    expect(state.toasts.at(-1)?.description).toContain('Upstream proxy aborted the response');
   });
 });
 
@@ -266,10 +582,11 @@ describe('useCodesignStore token usage tracking', () => {
     );
 
     vi.stubGlobal('window', {
-      codesign: { generate },
+      codesign: { generate, chat: mockChatApi(), snapshots: mockSnapshotsApi() },
       setTimeout,
     });
 
+    setWorkspaceBackedDesign();
     useCodesignStore.setState({ lastUsage: null });
 
     await useCodesignStore.getState().sendPrompt({ prompt: 'design landing' });
@@ -287,10 +604,11 @@ describe('useCodesignStore token usage tracking', () => {
     );
 
     vi.stubGlobal('window', {
-      codesign: { generate },
+      codesign: { generate, chat: mockChatApi(), snapshots: mockSnapshotsApi() },
       setTimeout,
     });
 
+    setWorkspaceBackedDesign();
     await useCodesignStore.getState().sendPrompt({ prompt: 'fallback' });
 
     const state = useCodesignStore.getState();
@@ -379,7 +697,11 @@ describe('useCodesignStore active provider routing', () => {
       Promise.resolve({ artifacts: [{ content: '<html></html>' }], message: 'Done.' }),
     );
 
-    vi.stubGlobal('window', { codesign: { generate }, setTimeout });
+    vi.stubGlobal('window', {
+      codesign: { generate, chat: mockChatApi(), snapshots: mockSnapshotsApi() },
+      setTimeout,
+    });
+    setWorkspaceBackedDesign();
 
     const openaiConfig: OnboardingState = {
       hasKey: true,
@@ -401,6 +723,43 @@ describe('useCodesignStore active provider routing', () => {
     const payload = call[0];
     expect(payload.model.provider).toBe('openai');
     expect(payload.model.modelId).toBe('gpt-4o');
+  });
+});
+
+describe('useCodesignStore design system picker', () => {
+  beforeAll(async () => {
+    await initI18n('en');
+  });
+
+  it('blocks design system linking before onboarding without invoking IPC', async () => {
+    const pickDesignSystemDirectory = vi.fn(async () => READY_CONFIG);
+    vi.stubGlobal('window', {
+      codesign: {
+        pickDesignSystemDirectory,
+      },
+      setTimeout,
+    });
+    useCodesignStore.setState({
+      config: {
+        hasKey: false,
+        provider: null,
+        modelPrimary: null,
+        baseUrl: null,
+        designSystem: null,
+      },
+    });
+
+    await useCodesignStore.getState().pickDesignSystemDirectory();
+
+    expect(pickDesignSystemDirectory).not.toHaveBeenCalled();
+    const state = useCodesignStore.getState();
+    expect(state.toasts[0]).toMatchObject({
+      variant: 'error',
+      title: 'Onboarding is not complete.',
+      description: 'Complete onboarding before linking a design system.',
+    });
+    expect(state.reportableErrors[0]?.code).toBe('DESIGN_SYSTEM_LINK_BLOCKED_ONBOARDING');
+    expect(state.reportableErrors[0]?.scope).toBe('onboarding');
   });
 });
 
@@ -459,6 +818,8 @@ describe('useCodesignStore design management', () => {
 
     vi.stubGlobal('window', {
       codesign: {
+        chat: mockChatApi(),
+        comments: mockCommentsApi(),
         snapshots: {
           listDesigns: vi.fn(() => Promise.resolve(designs)),
           list: vi.fn(() => Promise.resolve([])),
@@ -476,6 +837,111 @@ describe('useCodesignStore design management', () => {
     expect(useCodesignStore.getState().currentDesignId).toBe('design-a');
   });
 
+  it('hydrates switchDesign preview directly from workspace files when no snapshot exists', async () => {
+    const design = {
+      schemaVersion: 1 as const,
+      id: 'workspace-only',
+      name: 'Workspace only',
+      createdAt: '2024-01-01T00:00:00.000Z',
+      updatedAt: '2024-01-02T00:00:00.000Z',
+      thumbnailText: null,
+      deletedAt: null,
+      workspacePath: '/tmp/workspace-only',
+    };
+    const source =
+      'function App(){ return <main id="workspace-only">Hi</main>; }\nReactDOM.createRoot(document.getElementById("root")).render(<App/>);';
+    const read = vi.fn(async (_designId: string, path: string) => {
+      if (path !== 'App.jsx') throw new Error(`missing ${path}`);
+      return { path, content: source };
+    });
+
+    vi.stubGlobal('window', {
+      codesign: {
+        files: { read },
+        chat: mockChatApi(),
+        comments: mockCommentsApi(),
+        snapshots: {
+          listDesigns: vi.fn(() => Promise.resolve([design])),
+          list: vi.fn(() => Promise.resolve([])),
+        },
+      },
+      setTimeout,
+    });
+
+    await useCodesignStore.getState().switchDesign(design.id);
+
+    expect(useCodesignStore.getState().currentDesignId).toBe(design.id);
+    await vi.waitFor(() => {
+      expect(useCodesignStore.getState().previewSource).toBe(source);
+    });
+    expect(useCodesignStore.getState().previewSourceByDesign[design.id]).toBe(source);
+    expect(useCodesignStore.getState().canvasTabs).toEqual([
+      expect.objectContaining({ kind: 'files' }),
+      { kind: 'file', path: 'App.jsx' },
+    ]);
+  });
+
+  it('selects a cold generating design before preview hydration resolves', async () => {
+    const designA = { ...DEFAULT_DESIGN, id: 'design-a', workspacePath: '/tmp/design-a' };
+    const designB = { ...DEFAULT_DESIGN, id: 'design-b', workspacePath: '/tmp/design-b' };
+    const snapshotList = deferred<never[]>();
+    const appSource = deferred<{ path: string; content: string }>();
+    const source =
+      'function App(){ return <main id="design-b">Working</main>; }\nReactDOM.createRoot(document.getElementById("root")).render(<App/>);';
+    const read = vi.fn((_designId: string, path: string) => {
+      if (path === 'App.jsx') return appSource.promise;
+      return Promise.reject(new Error(`missing ${path}`));
+    });
+
+    vi.stubGlobal('window', {
+      codesign: {
+        files: { read },
+        chat: mockChatApi(),
+        comments: mockCommentsApi(),
+        snapshots: {
+          list: vi.fn((id: string) =>
+            id === 'design-b' ? snapshotList.promise : Promise.resolve([]),
+          ),
+        },
+      },
+      setTimeout,
+    });
+
+    useCodesignStore.setState({
+      designs: [designA, designB],
+      currentDesignId: 'design-a',
+      previewSource: '<html><body>A</body></html>',
+      previewSourceByDesign: { 'design-a': '<html><body>A</body></html>' },
+      recentDesignIds: ['design-a'],
+      designsViewOpen: true,
+      generationByDesign: {
+        'design-b': { generationId: 'gen-design-b', stage: 'streaming' },
+      },
+    });
+
+    const switchPromise = useCodesignStore.getState().switchDesign('design-b');
+
+    expect(useCodesignStore.getState().currentDesignId).toBe('design-b');
+    expect(useCodesignStore.getState().previewSource).toBeNull();
+    expect(useCodesignStore.getState().designsViewOpen).toBe(false);
+    expect(useCodesignStore.getState().isGenerating).toBe(true);
+    expect(useCodesignStore.getState().activeGenerationId).toBe('gen-design-b');
+
+    snapshotList.resolve([]);
+    await vi.waitFor(() => expect(read).toHaveBeenCalledWith('design-b', 'App.jsx'));
+    appSource.resolve({ path: 'App.jsx', content: source });
+    await switchPromise;
+
+    await vi.waitFor(() => {
+      expect(useCodesignStore.getState().previewSource).toBe(source);
+    });
+    expect(useCodesignStore.getState().previewSourceByDesign['design-b']).toBe(source);
+    expect(useCodesignStore.getState().canvasTabs).toEqual([
+      expect.objectContaining({ kind: 'files' }),
+      { kind: 'file', path: 'App.jsx' },
+    ]);
+  });
+
   it('createNewDesign resets messages + preview and stores the new id as current', async () => {
     const created = {
       schemaVersion: 1 as const,
@@ -485,20 +951,24 @@ describe('useCodesignStore design management', () => {
       updatedAt: '2024-01-01T00:00:00.000Z',
       thumbnailText: null,
       deletedAt: null,
+      workspacePath: '/tmp/fresh',
     };
 
     vi.stubGlobal('window', {
       codesign: {
+        chat: mockChatApi(),
+        comments: mockCommentsApi(),
         snapshots: {
           createDesign: vi.fn(() => Promise.resolve(created)),
           listDesigns: vi.fn(() => Promise.resolve([created])),
+          list: vi.fn(() => Promise.resolve([])),
         },
       },
       setTimeout,
     });
 
     useCodesignStore.setState({
-      previewHtml: '<html>old</html>',
+      previewSource: '<html>old</html>',
       currentDesignId: 'old-id',
     });
 
@@ -506,12 +976,168 @@ describe('useCodesignStore design management', () => {
     expect(result?.id).toBe('fresh');
     const state = useCodesignStore.getState();
     expect(state.currentDesignId).toBe('fresh');
-    expect(state.previewHtml).toBeNull();
+    expect(state.previewSource).toBeNull();
+  });
+
+  it('passes the selected workspace path into createDesign instead of rebinding afterward', async () => {
+    const created = {
+      schemaVersion: 1 as const,
+      id: 'fresh',
+      name: 'Untitled design 1',
+      createdAt: '2024-01-01T00:00:00.000Z',
+      updatedAt: '2024-01-01T00:00:00.000Z',
+      thumbnailText: null,
+      deletedAt: null,
+      workspacePath: '/tmp/chosen',
+    };
+    const createDesign = vi.fn(() => Promise.resolve(created));
+    const updateWorkspace = vi.fn();
+
+    vi.stubGlobal('window', {
+      codesign: {
+        chat: mockChatApi(),
+        comments: mockCommentsApi(),
+        snapshots: {
+          createDesign,
+          updateWorkspace,
+          listDesigns: vi.fn(() => Promise.resolve([created])),
+          list: vi.fn(() => Promise.resolve([])),
+        },
+      },
+      setTimeout,
+    });
+
+    await useCodesignStore.getState().createNewDesign('/tmp/chosen');
+
+    expect(createDesign).toHaveBeenCalledWith('Untitled design 1', '/tmp/chosen');
+    expect(updateWorkspace).not.toHaveBeenCalled();
+  });
+
+  it('creates a fresh conversation for the current workspace with clean UI state', async () => {
+    const existing = { ...DEFAULT_DESIGN, id: 'design-a', workspacePath: '/tmp/shared' };
+    const created = {
+      ...DEFAULT_DESIGN,
+      id: 'design-b',
+      name: 'Untitled design 1',
+      workspacePath: '/tmp/shared',
+    };
+    const createDesign = vi.fn(() => Promise.resolve(created));
+
+    vi.stubGlobal('window', {
+      codesign: {
+        chat: mockChatApi(),
+        comments: mockCommentsApi(),
+        snapshots: {
+          createDesign,
+          listDesigns: vi.fn(() => Promise.resolve([existing, created])),
+          list: vi.fn(() => Promise.resolve([])),
+        },
+      },
+      setTimeout,
+    });
+
+    useCodesignStore.setState({
+      designs: [existing],
+      currentDesignId: existing.id,
+      previewSource: '<main>old</main>',
+      chatMessages: [
+        {
+          schemaVersion: 1 as const,
+          id: 1,
+          designId: existing.id,
+          seq: 0,
+          kind: 'user',
+          payload: { text: 'old context' },
+          snapshotId: null,
+          createdAt: '2024-01-01T00:00:00.000Z',
+        },
+      ],
+    });
+
+    const result = await useCodesignStore.getState().createNewConversationForCurrentWorkspace();
+
+    expect(result?.id).toBe('design-b');
+    expect(createDesign).toHaveBeenCalledWith('Untitled design 1', '/tmp/shared', {
+      workspaceReuse: 'fresh-conversation',
+    });
+    expect(useCodesignStore.getState().currentDesignId).toBe('design-b');
+    expect(useCodesignStore.getState().previewSource).toBeNull();
+    expect(useCodesignStore.getState().chatMessages).toEqual([]);
+  });
+
+  it('imports picked files into the workspace and attaches imported paths to the prompt', async () => {
+    const imported = [
+      {
+        path: 'references/brief.md',
+        absolutePath: '/workspace/references/brief.md',
+        name: 'brief.md',
+        size: 42,
+        mediaType: 'text/markdown',
+        kind: 'reference' as const,
+        source: 'composer' as const,
+      },
+    ];
+    const importToWorkspace = vi.fn(async () => imported);
+    vi.stubGlobal('window', {
+      codesign: {
+        pickInputFiles: vi.fn(async () => [
+          { path: '/external/brief.md', name: 'brief.md', size: 42 },
+        ]),
+        files: { importToWorkspace },
+      },
+      setTimeout,
+    });
+    setWorkspaceBackedDesign();
+
+    await useCodesignStore.getState().pickInputFiles();
+
+    expect(importToWorkspace).toHaveBeenCalledWith({
+      designId: DEFAULT_DESIGN.id,
+      source: 'composer',
+      files: [{ path: '/external/brief.md', name: 'brief.md', size: 42 }],
+      timestamp: expect.any(String),
+    });
+    expect(useCodesignStore.getState().inputFiles).toEqual([
+      { path: 'references/brief.md', name: 'brief.md', size: 42 },
+    ]);
+  });
+
+  it('can import workspace files without attaching them to the current prompt', async () => {
+    const imported = [
+      {
+        path: 'assets/logo.png',
+        absolutePath: '/workspace/assets/logo.png',
+        name: 'logo.png',
+        size: 4,
+        mediaType: 'image/png',
+        kind: 'asset' as const,
+        source: 'workspace' as const,
+      },
+    ];
+    const importToWorkspace = vi.fn(async () => imported);
+    vi.stubGlobal('window', {
+      codesign: {
+        files: { importToWorkspace },
+      },
+      setTimeout,
+    });
+    setWorkspaceBackedDesign();
+
+    const result = await useCodesignStore.getState().importFilesToWorkspace({
+      source: 'workspace',
+      files: [{ path: '/external/logo.png', name: 'logo.png', size: 4 }],
+      attach: false,
+    });
+
+    expect(result).toEqual(imported);
+    expect(useCodesignStore.getState().inputFiles).toEqual([]);
   });
 
   it('allows switchDesign while another design is generating (generation stays bound to its origin)', async () => {
     vi.stubGlobal('window', {
       codesign: {
+        chat: mockChatApi(),
+        comments: mockCommentsApi(),
         snapshots: {
           list: vi.fn(() => Promise.resolve([])),
         },
@@ -521,6 +1147,9 @@ describe('useCodesignStore design management', () => {
 
     useCodesignStore.setState({
       currentDesignId: 'design-a',
+      generationByDesign: {
+        'design-a': { generationId: 'gen-design-a', stage: 'streaming' },
+      },
       isGenerating: true,
       generatingDesignId: 'design-a',
     });
@@ -529,15 +1158,220 @@ describe('useCodesignStore design management', () => {
 
     const state = useCodesignStore.getState();
     expect(state.currentDesignId).toBe('design-b');
-    // Generation flag still set, but bound to the originating design.
-    expect(state.isGenerating).toBe(true);
-    expect(state.generatingDesignId).toBe('design-a');
+    expect(state.generationByDesign['design-a']).toBeDefined();
+    expect(state.isGenerating).toBe(false);
+    expect(state.generatingDesignId).toBeNull();
+  });
+
+  it('allows creating a new design while another design is generating', async () => {
+    const created = {
+      ...DEFAULT_DESIGN,
+      id: 'design-b',
+      name: 'Untitled design 2',
+      workspacePath: '/tmp/design-b',
+    };
+    const createDesign = vi.fn(() => Promise.resolve(created));
+    vi.stubGlobal('window', {
+      codesign: {
+        chat: mockChatApi(),
+        comments: mockCommentsApi(),
+        snapshots: {
+          createDesign,
+          listDesigns: vi.fn(() => Promise.resolve([DEFAULT_DESIGN, created])),
+          list: vi.fn(() => Promise.resolve([])),
+        },
+      },
+      setTimeout,
+    });
+
+    useCodesignStore.setState({
+      designs: [DEFAULT_DESIGN],
+      currentDesignId: DEFAULT_DESIGN.id,
+      generationByDesign: {
+        [DEFAULT_DESIGN.id]: { generationId: 'gen-design-a', stage: 'streaming' },
+      },
+      isGenerating: true,
+      generatingDesignId: DEFAULT_DESIGN.id,
+    });
+
+    const result = await useCodesignStore.getState().createNewDesign();
+
+    expect(result?.id).toBe('design-b');
+    expect(createDesign).toHaveBeenCalledWith('Untitled design 1', undefined);
+    expect(useCodesignStore.getState().currentDesignId).toBe('design-b');
+    expect(useCodesignStore.getState().generationByDesign[DEFAULT_DESIGN.id]).toBeDefined();
+  });
+
+  it('allows a second design to start generating while the first design is still running', async () => {
+    const designA = { ...DEFAULT_DESIGN, id: 'design-a', workspacePath: '/tmp/design-a' };
+    const designB = { ...DEFAULT_DESIGN, id: 'design-b', workspacePath: '/tmp/design-b' };
+    const pendingById = new Map<
+      string,
+      ReturnType<typeof deferred<{ artifacts: Array<{ content: string }>; message: string }>>
+    >();
+    const generate = vi.fn((payload: { generationId?: string; designId?: string }) => {
+      if (!payload.generationId) throw new Error('missing generationId');
+      const task = deferred<{ artifacts: Array<{ content: string }>; message: string }>();
+      pendingById.set(payload.generationId, task);
+      return task.promise;
+    });
+
+    vi.stubGlobal('window', {
+      codesign: {
+        generate,
+        chat: mockChatApi(),
+        comments: mockCommentsApi(),
+        snapshots: {
+          ...mockSnapshotsApi(),
+          list: vi.fn(() => Promise.resolve([])),
+        },
+      },
+      setTimeout,
+    });
+
+    useCodesignStore.setState({
+      designs: [designA, designB],
+      currentDesignId: 'design-a',
+    });
+
+    const firstRun = useCodesignStore.getState().sendPrompt({ prompt: 'first prompt' });
+    await vi.waitFor(() => expect(generate).toHaveBeenCalledTimes(1));
+    const firstPayload = generate.mock.calls[0]?.[0] as { generationId: string; designId: string };
+
+    await useCodesignStore.getState().switchDesign('design-b');
+    expect(useCodesignStore.getState().isGenerating).toBe(false);
+
+    const secondRun = useCodesignStore.getState().sendPrompt({ prompt: 'second prompt' });
+    await vi.waitFor(() => expect(generate).toHaveBeenCalledTimes(2));
+    const secondPayload = generate.mock.calls[1]?.[0] as {
+      generationId: string;
+      designId: string;
+    };
+
+    expect(firstPayload.designId).toBe('design-a');
+    expect(secondPayload.designId).toBe('design-b');
+    expect(Object.keys(useCodesignStore.getState().generationByDesign).sort()).toEqual([
+      'design-a',
+      'design-b',
+    ]);
+
+    pendingById.get(secondPayload.generationId)?.resolve({
+      artifacts: [{ content: '<html>second</html>' }],
+      message: 'Second done',
+    });
+    await secondRun;
+    expect(useCodesignStore.getState().currentDesignId).toBe('design-b');
+    expect(useCodesignStore.getState().previewSource).toBe('<html>second</html>');
+    expect(useCodesignStore.getState().generationStage).toBe('done');
+
+    pendingById.get(firstPayload.generationId)?.resolve({
+      artifacts: [{ content: '<html>first</html>' }],
+      message: 'First done',
+    });
+    await firstRun;
+
+    expect(useCodesignStore.getState().currentDesignId).toBe('design-b');
+    expect(useCodesignStore.getState().previewSource).toBe('<html>second</html>');
+    expect(useCodesignStore.getState().generationStage).toBe('done');
+    expect(useCodesignStore.getState().previewSourceByDesign['design-a']).toBe(
+      '<html>first</html>',
+    );
+    expect(useCodesignStore.getState().generationByDesign).toEqual({});
+  });
+
+  it('blocks generation when another session is already running for the same workspace', async () => {
+    const designA = { ...DEFAULT_DESIGN, id: 'design-a', workspacePath: '/tmp/shared' };
+    const designB = { ...DEFAULT_DESIGN, id: 'design-b', workspacePath: '/tmp/shared/' };
+    const generate = vi.fn(async () => ({
+      artifacts: [{ content: '<html>blocked</html>' }],
+      message: 'should not run',
+    }));
+
+    vi.stubGlobal('window', {
+      codesign: {
+        generate,
+        chat: mockChatApi(),
+        comments: mockCommentsApi(),
+        snapshots: mockSnapshotsApi(),
+      },
+      setTimeout,
+    });
+
+    useCodesignStore.setState({
+      designs: [designA, designB],
+      currentDesignId: 'design-b',
+      generationByDesign: {
+        'design-a': { generationId: 'gen-design-a', stage: 'streaming' },
+      },
+    });
+
+    await useCodesignStore.getState().sendPrompt({ prompt: 'same workspace prompt' });
+
+    expect(generate).not.toHaveBeenCalled();
+    expect(useCodesignStore.getState().toasts[0]?.title).toBe(
+      'A generation is already running for this workspace',
+    );
+  });
+
+  it('refreshes the current design when selecting it again from the hub', async () => {
+    const designId = 'design-current-refresh';
+    const placeholder =
+      '<!doctype html><html><body><!-- artifact source lives in index.jsx --></body></html>';
+    const jsxSource =
+      'function App(){ return <main id="fresh-current">Fresh</main>; }\nReactDOM.createRoot(document.getElementById("root")).render(<App/>);';
+
+    vi.stubGlobal('window', {
+      codesign: {
+        chat: mockChatApi(),
+        comments: mockCommentsApi(),
+        files: {
+          read: vi.fn(async (_id: string, path: string) => ({
+            path,
+            content: path === 'index.jsx' ? jsxSource : placeholder,
+          })),
+        },
+        snapshots: {
+          list: vi.fn(() =>
+            Promise.resolve([
+              {
+                schemaVersion: 1,
+                id: 'snap-1',
+                designId,
+                parentId: null,
+                type: 'initial',
+                prompt: null,
+                artifactType: 'html',
+                artifactSource: placeholder,
+                createdAt: '2024-01-01T00:00:00.000Z',
+              },
+            ]),
+          ),
+        },
+      },
+      setTimeout,
+    });
+
+    useCodesignStore.setState({
+      currentDesignId: designId,
+      previewSource: placeholder,
+      previewSourceByDesign: { [designId]: placeholder },
+      recentDesignIds: [designId],
+      designsViewOpen: true,
+    });
+
+    await useCodesignStore.getState().switchDesign(designId);
+
+    expect(useCodesignStore.getState().designsViewOpen).toBe(false);
+    await vi.waitFor(() => expect(useCodesignStore.getState().previewSource).toBe(jsxSource));
+    expect(useCodesignStore.getState().previewSourceByDesign[designId]).toBe(jsxSource);
   });
 
   it('blocks softDeleteDesign while a generation is running so applyGenerateSuccess cannot leak into a stale design', async () => {
     const softDeleteDesign = vi.fn(() => Promise.resolve());
     vi.stubGlobal('window', {
       codesign: {
+        chat: mockChatApi(),
+        comments: mockCommentsApi(),
         snapshots: {
           softDeleteDesign,
           listDesigns: vi.fn(() => Promise.resolve([])),
@@ -548,7 +1382,11 @@ describe('useCodesignStore design management', () => {
 
     useCodesignStore.setState({
       currentDesignId: 'design-a',
+      generationByDesign: {
+        'design-a': { generationId: 'gen-design-a', stage: 'streaming' },
+      },
       isGenerating: true,
+      generatingDesignId: 'design-a',
     });
 
     await useCodesignStore.getState().softDeleteDesign('design-a');
@@ -562,11 +1400,21 @@ describe('useCodesignStore design management', () => {
 describe('useCodesignStore previewZoom', () => {
   it('defaults previewZoom to 100', () => {
     expect(useCodesignStore.getState().previewZoom).toBe(100);
+    expect(useCodesignStore.getState().previewZoomMode).toBe('fit');
   });
 
-  it('updates previewZoom via setPreviewZoom', () => {
+  it('updates previewZoom via setPreviewZoom and switches to manual mode', () => {
+    useCodesignStore.getState().setPreviewZoomFit(82);
     useCodesignStore.getState().setPreviewZoom(150);
     expect(useCodesignStore.getState().previewZoom).toBe(150);
+    expect(useCodesignStore.getState().previewZoomMode).toBe('manual');
+  });
+
+  it('updates previewZoom via setPreviewZoomFit while preserving fit mode', () => {
+    useCodesignStore.getState().setPreviewZoom(125);
+    useCodesignStore.getState().setPreviewZoomFit(74);
+    expect(useCodesignStore.getState().previewZoom).toBe(74);
+    expect(useCodesignStore.getState().previewZoomMode).toBe('fit');
   });
 });
 describe('useCodesignStore artifact persistence', () => {
@@ -574,7 +1422,7 @@ describe('useCodesignStore artifact persistence', () => {
     await initI18n('en');
   });
 
-  it('writes a design_snapshots row after generate.ok and rehydrates the preview on switchDesign', async () => {
+  it('writes a snapshot after generate.ok and rehydrates the preview on switchDesign', async () => {
     const designId = 'design-persist';
     const designRow = {
       schemaVersion: 1 as const,
@@ -584,10 +1432,10 @@ describe('useCodesignStore artifact persistence', () => {
       updatedAt: '2024-01-01T00:00:00.000Z',
       thumbnailText: null,
       deletedAt: null,
-      workspacePath: null,
+      workspacePath: '/tmp/design-persist',
     };
 
-    // Stand-in for the SQLite-backed snapshots table.
+    // Stand-in for the persisted snapshots store.
     type SnapshotRow = {
       schemaVersion: 1;
       id: string;
@@ -631,6 +1479,8 @@ describe('useCodesignStore artifact persistence', () => {
     vi.stubGlobal('window', {
       codesign: {
         generate,
+        chat: mockChatApi(),
+        comments: mockCommentsApi(),
         snapshots: {
           listDesigns,
           list,
@@ -663,14 +1513,269 @@ describe('useCodesignStore artifact persistence', () => {
     // Simulate a fresh app load: blow away in-memory state then switchDesign.
     useCodesignStore.setState({
       currentDesignId: null,
-      previewHtml: null,
+      previewSource: null,
     });
 
     await useCodesignStore.getState().switchDesign(designId);
 
     const restored = useCodesignStore.getState();
     expect(restored.currentDesignId).toBe(designId);
-    expect(restored.previewHtml).toBe('<html><body>persisted</body></html>');
+    expect(restored.previewSource).toBe('<html><body>persisted</body></html>');
+  });
+
+  it('persists referenced JSX source instead of the placeholder index.html', async () => {
+    const designId = 'design-referenced-source';
+    const designRow = {
+      schemaVersion: 1 as const,
+      id: designId,
+      name: 'Referenced source',
+      createdAt: '2024-01-01T00:00:00.000Z',
+      updatedAt: '2024-01-01T00:00:00.000Z',
+      thumbnailText: null,
+      deletedAt: null,
+      workspacePath: '/tmp/codesign',
+    };
+    const placeholder =
+      '<!doctype html><html><body><!-- artifact source lives in index.jsx --></body></html>';
+    const jsxSource =
+      'function App(){ return <main id="real-source">Hi</main>; }\nReactDOM.createRoot(document.getElementById("root")).render(<App/>);';
+    const create = vi.fn((input) => Promise.resolve({ id: 'snap-1', ...input }));
+
+    vi.stubGlobal('window', {
+      codesign: {
+        files: {
+          read: vi.fn(async (_id: string, path: string) => ({
+            path,
+            content: path === 'index.jsx' ? jsxSource : placeholder,
+          })),
+        },
+        snapshots: {
+          list: vi.fn(() => Promise.resolve([])),
+          create,
+          listDesigns: vi.fn(() => Promise.resolve([designRow])),
+        },
+      },
+      setTimeout,
+    });
+
+    useCodesignStore.setState({
+      currentDesignId: designId,
+      designs: [designRow],
+      previewSource: placeholder,
+      chatMessages: [
+        {
+          schemaVersion: 1,
+          id: 1,
+          designId,
+          seq: 1,
+          kind: 'user',
+          payload: { text: 'make a messaging screen' },
+          snapshotId: null,
+          createdAt: '2024-01-01T00:00:00.000Z',
+        },
+      ],
+    });
+
+    await useCodesignStore.getState().persistAgentRunSnapshot({ designId });
+
+    expect(create).toHaveBeenCalledOnce();
+    expect(create.mock.calls[0]?.[0]).toMatchObject({
+      artifactSource: jsxSource,
+      prompt: 'make a messaging screen',
+    });
+    expect(useCodesignStore.getState().previewSource).toBe(jsxSource);
+  });
+
+  it('persists a completed background run from the per-design preview pool', async () => {
+    const activeDesignId = 'active-design';
+    const backgroundDesignId = 'background-design';
+    const activeSource = '<main>active</main>';
+    const backgroundSource =
+      'function App(){ return <main id="background">Done</main>; }\nReactDOM.createRoot(document.getElementById("root")).render(<App/>);';
+    const activeDesign = { ...DEFAULT_DESIGN, id: activeDesignId };
+    const backgroundDesign = {
+      ...DEFAULT_DESIGN,
+      id: backgroundDesignId,
+      name: 'Background design',
+    };
+    const create = vi.fn((input) => Promise.resolve({ id: 'snap-background', ...input }));
+    const listDesigns = vi.fn(() => Promise.resolve([activeDesign, backgroundDesign]));
+
+    vi.stubGlobal('window', {
+      codesign: {
+        files: {
+          read: vi.fn(async (_id: string, path: string) => ({
+            path,
+            content: backgroundSource,
+          })),
+        },
+        snapshots: {
+          list: vi.fn(() => Promise.resolve([])),
+          create,
+          listDesigns,
+        },
+      },
+      setTimeout,
+    });
+
+    useCodesignStore.setState({
+      currentDesignId: activeDesignId,
+      designs: [activeDesign, backgroundDesign],
+      previewSource: activeSource,
+      previewSourceByDesign: {
+        [activeDesignId]: activeSource,
+        [backgroundDesignId]: backgroundSource,
+      },
+      recentDesignIds: [backgroundDesignId, activeDesignId],
+      chatMessages: [],
+    });
+
+    await useCodesignStore
+      .getState()
+      .persistAgentRunSnapshot({ designId: backgroundDesignId, finalText: 'Done.' });
+
+    expect(create).toHaveBeenCalledOnce();
+    expect(create.mock.calls[0]?.[0]).toMatchObject({
+      designId: backgroundDesignId,
+      artifactSource: backgroundSource,
+      prompt: null,
+      message: 'Done.',
+    });
+    expect(listDesigns).toHaveBeenCalledOnce();
+    expect(useCodesignStore.getState().currentDesignId).toBe(activeDesignId);
+    expect(useCodesignStore.getState().previewSource).toBe(activeSource);
+  });
+
+  it('falls back to workspace App.jsx when a background run is not in the preview pool', async () => {
+    const activeDesignId = 'active-design';
+    const backgroundDesignId = 'background-design';
+    const activeSource = '<main>active</main>';
+    const backgroundSource =
+      'function App(){ return <main id="workspace-background">Done</main>; }\nReactDOM.createRoot(document.getElementById("root")).render(<App/>);';
+    const create = vi.fn((input) => Promise.resolve({ id: 'snap-background', ...input }));
+    const read = vi.fn(async (_id: string, path: string) => {
+      if (path !== 'App.jsx') throw new Error(`missing ${path}`);
+      return { path, content: backgroundSource };
+    });
+
+    vi.stubGlobal('window', {
+      codesign: {
+        files: { read },
+        snapshots: {
+          list: vi.fn(() => Promise.resolve([])),
+          create,
+          listDesigns: vi.fn(() => Promise.resolve([])),
+        },
+      },
+      setTimeout,
+    });
+
+    useCodesignStore.setState({
+      currentDesignId: activeDesignId,
+      previewSource: activeSource,
+      previewSourceByDesign: { [activeDesignId]: activeSource },
+      recentDesignIds: [activeDesignId],
+      chatMessages: [],
+    });
+
+    await useCodesignStore.getState().persistAgentRunSnapshot({ designId: backgroundDesignId });
+
+    expect(read).toHaveBeenCalledWith(backgroundDesignId, 'App.jsx');
+    expect(create).toHaveBeenCalledOnce();
+    expect(create.mock.calls[0]?.[0]).toMatchObject({
+      designId: backgroundDesignId,
+      artifactSource: backgroundSource,
+    });
+    expect(useCodesignStore.getState().previewSource).toBe(activeSource);
+  });
+
+  it('skips snapshot persistence when a referenced workspace source cannot be read', async () => {
+    const designId = 'design-missing-source';
+    const placeholder =
+      '<!doctype html><html><body><!-- artifact source lives in index.jsx --></body></html>';
+    const create = vi.fn();
+
+    vi.stubGlobal('window', {
+      codesign: {
+        files: {
+          read: vi.fn(async () => {
+            throw new Error('index.jsx is missing');
+          }),
+        },
+        snapshots: {
+          list: vi.fn(() => Promise.resolve([])),
+          create,
+          listDesigns: vi.fn(() => Promise.resolve([])),
+        },
+      },
+      setTimeout,
+    });
+
+    useCodesignStore.setState({
+      currentDesignId: designId,
+      previewSource: placeholder,
+      chatMessages: [
+        {
+          schemaVersion: 1,
+          id: 1,
+          designId,
+          seq: 1,
+          kind: 'user',
+          payload: { text: 'make a dashboard' },
+          snapshotId: null,
+          createdAt: '2024-01-01T00:00:00.000Z',
+        },
+      ],
+    });
+
+    await useCodesignStore.getState().persistAgentRunSnapshot({ designId });
+
+    expect(create).not.toHaveBeenCalled();
+    expect(useCodesignStore.getState().previewSource).toBe(placeholder);
+    expect(useCodesignStore.getState().toasts.at(-1)).toMatchObject({
+      variant: 'error',
+      description: 'index.jsx is missing',
+    });
+  });
+
+  it('resolves referenced workspace source before exporting', async () => {
+    const designId = 'design-export-source';
+    const placeholder =
+      '<!doctype html><html><body><!-- artifact source lives in index.jsx --></body></html>';
+    const jsxSource =
+      'function App(){ return <main id="export-source">Export</main>; }\nReactDOM.createRoot(document.getElementById("root")).render(<App/>);';
+    const exportFile = vi.fn((_input: unknown) =>
+      Promise.resolve({ status: 'saved', path: '/tmp/export.html' }),
+    );
+
+    vi.stubGlobal('window', {
+      codesign: {
+        files: {
+          read: vi.fn(async (_id: string, path: string) => ({
+            path,
+            content: path === 'index.jsx' ? jsxSource : placeholder,
+          })),
+        },
+        export: exportFile,
+      },
+      setTimeout,
+    });
+
+    useCodesignStore.setState({
+      currentDesignId: designId,
+      previewSource: placeholder,
+      previewSourceByDesign: { [designId]: placeholder },
+      recentDesignIds: [designId],
+    });
+
+    await useCodesignStore.getState().exportActive('html');
+
+    expect(exportFile).toHaveBeenCalledOnce();
+    expect(exportFile.mock.calls[0]?.[0]).toMatchObject({
+      format: 'html',
+      artifactSource: jsxSource,
+    });
+    expect(useCodesignStore.getState().previewSource).toBe(jsxSource);
   });
 });
 
@@ -978,15 +2083,20 @@ describe('applyGenerateError via sendPrompt', () => {
     await initI18n('en');
   });
 
-  async function runFailingGenerate(err: unknown): Promise<void> {
+  async function runFailingGenerate(
+    err: unknown,
+    extras: Record<string, unknown> = {},
+  ): Promise<void> {
     const recordRendererError = vi.fn().mockResolvedValue({ eventId: null });
     vi.stubGlobal('window', {
       codesign: {
         generate: vi.fn().mockRejectedValue(err),
         diagnostics: { recordRendererError },
+        ...extras,
       },
     });
     resetStore();
+    setWorkspaceBackedDesign();
     useCodesignStore.setState({ reportableErrors: [] });
     await useCodesignStore.getState().sendPrompt({ prompt: 'hello' });
     await Promise.resolve();
@@ -1009,20 +2119,204 @@ describe('applyGenerateError via sendPrompt', () => {
     expect(records[0]?.code).toBe('GENERATION_FAILED');
   });
 
+  it('classifies opaque terminated transport failures while keeping the raw detail', async () => {
+    const err = new Error(
+      "Error invoking remote method 'codesign:v1:generate': CodesignError: terminated",
+    );
+
+    await runFailingGenerate(err);
+
+    const state = useCodesignStore.getState();
+    expect(state.lastError).toContain('The provider connection ended before the turn completed');
+    expect(state.lastError).toContain('Technical detail: terminated');
+    expect(state.lastError).not.toBe('terminated');
+    expect(state.toasts[0]?.description).toBe(state.lastError);
+    expect(state.reportableErrors[0]?.message).toBe(err.message);
+    expect(state.reportableErrors[0]?.context).toMatchObject({
+      diagnostic_category: 'transport-interrupted',
+      display_message: state.lastError,
+    });
+  });
+
+  it('offers an Advanced settings action for generation timeouts', async () => {
+    const err = Object.assign(
+      new Error(
+        "Error invoking remote method 'codesign:v1:generate': CodesignError: Generation aborted after 1200s (Settings -> Advanced -> Generation timeout).",
+      ),
+      { code: 'GENERATION_TIMEOUT' },
+    );
+
+    await runFailingGenerate(err);
+
+    const state = useCodesignStore.getState();
+    expect(state.toasts[0]?.description).toContain('configured timeout');
+    expect(state.reportableErrors[0]?.context).toMatchObject({
+      diagnostic_category: 'generation-timeout',
+      recovery_action: 'openSettings',
+    });
+
+    state.toasts[0]?.action?.onClick();
+    expect(useCodesignStore.getState().view).toBe('settings');
+    expect(useCodesignStore.getState().settingsTab).toBe('advanced');
+  });
+
   it('attaches upstream context from a NormalizedProviderError-shaped error', async () => {
     const err = Object.assign(new Error('http 502'), {
       code: 'PROVIDER_HTTP_5XX',
       upstream_provider: 'anthropic',
       upstream_status: 502,
+      upstream_baseurl: 'https://secret-relay.example.com/v1',
       retry_count: 2,
     });
     await runFailingGenerate(err);
     const records = useCodesignStore.getState().reportableErrors;
     expect(records[0]?.code).toBe('PROVIDER_HTTP_5XX');
-    expect(records[0]?.context).toEqual({
+    expect(records[0]?.context).toMatchObject({
       upstream_provider: 'anthropic',
       upstream_status: 502,
+      upstream_baseurl: '[url omitted]',
       retry_count: 2,
+      diagnostic_category: 'upstream-server-error',
+    });
+  });
+
+  it('classifies 403 blocked generation errors as gateway WAF blocks', async () => {
+    const err = Object.assign(
+      new Error(
+        "Error invoking remote method 'codesign:v1:generate': CodesignError: 403 Your request was blocked.",
+      ),
+      {
+        code: 'PROVIDER_ERROR',
+        upstream_provider: 'anthropic',
+        upstream_status: 403,
+        upstream_baseurl: 'https://relay.example.com/v1',
+      },
+    );
+
+    await runFailingGenerate(err);
+
+    const state = useCodesignStore.getState();
+    expect(state.toasts[0]?.description).toContain('gateway or reverse proxy blocked');
+    expect(state.toasts[0]?.description).not.toContain('API key invalid');
+    expect(state.reportableErrors[0]?.context).toMatchObject({
+      diagnostic_category: 'gateway-waf-blocked',
+      display_message: '403 Your request was blocked.',
+    });
+  });
+
+  it('cleans Electron IPC wrapper for toast/chat while preserving raw report context', async () => {
+    const rawMessage =
+      "Error invoking remote method 'codesign:v1:generate': CodesignError: 404 model 'models/gemini-2.5-pro' not found";
+    const err = Object.assign(new Error(rawMessage), {
+      code: 'PROVIDER_ERROR',
+      upstream_provider: 'ollama',
+      upstream_model_id: 'models/gemini-2.5-pro',
+      upstream_status: 404,
+    });
+
+    await runFailingGenerate(err);
+
+    const state = useCodesignStore.getState();
+    expect(state.lastError).toBe("404 model 'models/gemini-2.5-pro' not found");
+    expect(state.toasts[0]?.description).toContain("404 model 'models/gemini-2.5-pro' not found");
+    expect(state.toasts[0]?.description).not.toContain('Error invoking remote method');
+
+    const record = state.reportableErrors[0];
+    expect(record?.message).toBe(rawMessage);
+    expect(record?.context).toMatchObject({
+      diagnostic_category: 'model-id-shape',
+      display_message: "404 model 'models/gemini-2.5-pro' not found",
+      recovery_action: 'normalizeModelId',
+      upstream_model_id: 'models/gemini-2.5-pro',
+    });
+  });
+
+  it('cleans Electron IPC wrapper when validation errors have no ErrorName prefix', async () => {
+    const rawMessage =
+      'Error invoking remote method \'codesign:v1:generate\': [\n  { "message": "Invalid url", "path": ["referenceUrl"] }\n]';
+
+    await runFailingGenerate(new Error(rawMessage));
+
+    const state = useCodesignStore.getState();
+    expect(state.lastError).toContain('Invalid url');
+    expect(state.lastError).not.toContain('Error invoking remote method');
+    expect(state.toasts[0]?.description).not.toContain('Error invoking remote method');
+  });
+
+  it('offers a safe provider update action for model-id diagnostics', async () => {
+    const nextConfig = { ...READY_CONFIG, modelPrimary: 'gemini-2.5-pro' };
+    const updateProvider = vi.fn().mockResolvedValue(nextConfig);
+    const err = Object.assign(
+      new Error(
+        "Error invoking remote method 'codesign:v1:generate': CodesignError: 404 model 'models/gemini-2.5-pro' not found",
+      ),
+      {
+        code: 'PROVIDER_ERROR',
+        upstream_provider: 'ollama',
+        upstream_model_id: 'models/gemini-2.5-pro',
+        upstream_status: 404,
+      },
+    );
+
+    await runFailingGenerate(err, { config: { updateProvider } });
+    useCodesignStore.getState().toasts[0]?.action?.onClick();
+    await Promise.resolve();
+
+    expect(updateProvider).toHaveBeenCalledWith({
+      id: 'ollama',
+      defaultModel: 'gemini-2.5-pro',
+    });
+  });
+
+  it('offers the model-id fix for models/ prefixed 400 errors with no body', async () => {
+    const nextConfig = { ...READY_CONFIG, modelPrimary: 'gemini-2.5-flash' };
+    const updateProvider = vi.fn().mockResolvedValue(nextConfig);
+    const err = Object.assign(
+      new Error(
+        "Error invoking remote method 'codesign:v1:generate': CodesignError: 400 status code (no body)",
+      ),
+      {
+        code: 'PROVIDER_ERROR',
+        upstream_provider: 'custom-cliproxyapi',
+        upstream_model_id: 'models/gemini-2.5-flash',
+        upstream_status: 400,
+      },
+    );
+
+    await runFailingGenerate(err, { config: { updateProvider } });
+    useCodesignStore.getState().toasts[0]?.action?.onClick();
+    await Promise.resolve();
+
+    expect(useCodesignStore.getState().reportableErrors[0]?.context).toMatchObject({
+      diagnostic_category: 'model-id-shape',
+      recovery_action: 'normalizeModelId',
+    });
+    expect(updateProvider).toHaveBeenCalledWith({
+      id: 'custom-cliproxyapi',
+      defaultModel: 'gemini-2.5-flash',
+    });
+  });
+
+  it('offers a safe provider update action for reasoning-policy diagnostics', async () => {
+    const updateProvider = vi.fn().mockResolvedValue(READY_CONFIG);
+    const err = Object.assign(
+      new Error(
+        "Error invoking remote method 'codesign:v1:generate': CodesignError: 400 The `reasoning_content` in the thinking mode must be passed back to the API.",
+      ),
+      {
+        code: 'PROVIDER_ERROR',
+        upstream_provider: 'custom-deepseek',
+        upstream_status: 400,
+      },
+    );
+
+    await runFailingGenerate(err, { config: { updateProvider } });
+    useCodesignStore.getState().toasts[0]?.action?.onClick();
+    await Promise.resolve();
+
+    expect(updateProvider).toHaveBeenCalledWith({
+      id: 'custom-deepseek',
+      reasoningLevel: 'off',
     });
   });
 });
@@ -1170,6 +2464,9 @@ describe('useCodesignStore generation-blocking workspace guards', () => {
     useCodesignStore.setState({
       designs: [mockDesign],
       currentDesignId: 'design-1',
+      generationByDesign: {
+        'design-1': { generationId: 'gen-design-1', stage: 'streaming' },
+      },
       isGenerating: true,
       generatingDesignId: 'design-1',
       workspaceRebindPending: null,
@@ -1185,6 +2482,9 @@ describe('useCodesignStore generation-blocking workspace guards', () => {
     useCodesignStore.setState({
       designs: [mockDesign, { ...mockDesign, id: 'design-2' }],
       currentDesignId: 'design-1',
+      generationByDesign: {
+        'design-2': { generationId: 'gen-design-2', stage: 'streaming' },
+      },
       isGenerating: true,
       generatingDesignId: 'design-2',
       workspaceRebindPending: null,

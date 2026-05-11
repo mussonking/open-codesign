@@ -10,6 +10,7 @@ import {
   readTextFileIfExists,
   requireEnv,
   runGh,
+  runGit,
   truncate,
   writeTempJson,
 } from './deepseek-common.mjs';
@@ -56,6 +57,116 @@ function serializeExcerpts(excerpts) {
   return excerpts.map((entry) => `## ${entry.path}\n${entry.content}`).join('\n\n');
 }
 
+function touchesReleasePath(files) {
+  return files.some((file) => {
+    const name = file.filename;
+    return (
+      name === '.github/workflows/release.yml' ||
+      name === '.github/workflows/packaging-smoke.yml' ||
+      name.startsWith('packaging/') ||
+      name.startsWith('.github/releases/') ||
+      name === 'CHANGELOG.md'
+    );
+  });
+}
+
+function loadReleaseContext(files) {
+  if (!touchesReleasePath(files)) {
+    return 'No release or distribution files changed.';
+  }
+
+  const paths = [
+    '.github/workflows/release.yml',
+    '.github/workflows/packaging-smoke.yml',
+    'packaging/update-shas.sh',
+    'packaging/README.md',
+    'packaging/homebrew/Casks/open-codesign.rb',
+    'packaging/scoop/bucket/open-codesign.json',
+    'packaging/winget/manifests/o/OpenCoworkAI/OpenCoDesign/0.2.0/OpenCoworkAI.OpenCoDesign.yaml',
+    'packaging/winget/manifests/o/OpenCoworkAI/OpenCoDesign/0.2.0/OpenCoworkAI.OpenCoDesign.installer.yaml',
+    'packaging/winget/manifests/o/OpenCoworkAI/OpenCoDesign/0.2.0/OpenCoworkAI.OpenCoDesign.locale.en-US.yaml',
+    'packaging/flatpak/ai.opencowork.codesign.yaml',
+  ];
+
+  const localContext = loadRepoDocs(paths, 9000);
+  let releaseChecksums = '';
+  try {
+    releaseChecksums = runGh([
+      'release',
+      'download',
+      'v0.2.0',
+      '-R',
+      'OpenCoworkAI/open-codesign',
+      '--pattern',
+      'SHA256SUMS.txt',
+      '--output',
+      '-',
+    ]);
+  } catch (error) {
+    releaseChecksums = `Could not load v0.2.0 SHA256SUMS.txt: ${error.message}`;
+  }
+
+  let homebrew = '';
+  try {
+    homebrew = runGh([
+      'api',
+      'repos/OpenCoworkAI/homebrew-tap/contents/Casks/open-codesign.rb',
+      '--jq',
+      '.content',
+    ]);
+    homebrew = Buffer.from(homebrew, 'base64').toString('utf8');
+  } catch (error) {
+    homebrew = `Could not load live Homebrew tap cask: ${error.message}`;
+  }
+
+  let scoop = '';
+  try {
+    scoop = runGh([
+      'api',
+      'repos/OpenCoworkAI/scoop-bucket/contents/bucket/open-codesign.json',
+      '--jq',
+      '.content',
+    ]);
+    scoop = Buffer.from(scoop, 'base64').toString('utf8');
+  } catch (error) {
+    scoop = `Could not load live Scoop bucket manifest: ${error.message}`;
+  }
+
+  return [
+    'Release/distribution validation context:',
+    serializeDocs(localContext),
+    '## GitHub Release v0.2.0 SHA256SUMS.txt',
+    releaseChecksums,
+    '## Live OpenCoworkAI/homebrew-tap Cask',
+    homebrew,
+    '## Live OpenCoworkAI/scoop-bucket manifest',
+    scoop,
+  ].join('\n\n');
+}
+
+function loadPullRequestDiff(prNumber, repo, prMeta) {
+  try {
+    return runGh(['pr', 'diff', prNumber, '-R', repo]);
+  } catch (error) {
+    const message = String(error?.message || error);
+    if (!message.includes('diff exceeded the maximum number of files')) {
+      throw error;
+    }
+    const baseRef = prMeta.baseRefName;
+    const headRef = `refs/remotes/pull/${prNumber}/head`;
+    const localDiff = runGit([
+      'diff',
+      '--find-renames',
+      '--unified=80',
+      `origin/${baseRef}...${headRef}`,
+    ]);
+    return [
+      'GitHub PR diff API refused this large PR diff (>300 files); using local git diff.',
+      localDiff,
+    ].join('\n\n');
+  }
+}
+
 async function main() {
   const apiKey = requireEnv('DEEPSEEK_API_KEY');
   const baseUrl = requireEnv('DEEPSEEK_BASE_URL');
@@ -85,8 +196,8 @@ async function main() {
       'number,title,body,labels,author,additions,deletions,changedFiles,headRefOid,baseRefName,headRefName,url',
     ]),
   );
-  const diff = runGh(['pr', 'diff', prNumber, '-R', repo]);
   const files = listPullRequestFiles(repo, prNumber);
+  const diff = loadPullRequestDiff(prNumber, repo, prMeta);
   const docs = loadRepoDocs(
     [
       'CLAUDE.md',
@@ -104,6 +215,7 @@ async function main() {
     8,
     5000,
   );
+  const releaseContext = loadReleaseContext(files);
 
   let followUpContext = 'None.';
   if (isFollowUpReview && latestBotReviewId) {
@@ -151,6 +263,9 @@ async function main() {
     '',
     'PR head file excerpts:',
     serializeExcerpts(excerpts),
+    '',
+    'Release/distribution context:',
+    truncate(releaseContext, 60000, 'release distribution context'),
     '',
     'Unified diff:',
     truncate(diff, 140000, 'PR diff'),

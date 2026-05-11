@@ -37,7 +37,7 @@
 
 ## What's new
 
-- **v0.2.0** *(in preparation, expected in about a week)* — Agentic Design: workspace-backed design sessions · permissioned file/tool loop · lazy skills and scaffolds · `DESIGN.md` design systems
+- **v0.2.0** *(2026-05-09)* — Agentic Design: workspace-backed sessions · permissioned local tools · Files panel upgrades · provider diagnostics · security hardening · `DESIGN.md` design systems
 - **v0.1.4** *(2026-04-23)* — AI image generation · ChatGPT Plus/Codex subscription support · CLIProxyAPI one-click import · API config hardening
 - **v0.1.3** *(2026-04-21)* — Gemini `models/` prefix fix · OpenAI-compatible relay "instructions required" fix · third-party relay SSE-truncation hint
 - **v0.1.2** *(2026-04-21)* — Release pipeline · Homebrew / winget / Scoop packaging manifests
@@ -82,7 +82,7 @@ Open source, desktop-native, and built for people who do not want their design w
 | Bring your own key | ✅ Any provider | ❌ Anthropic only | ❌ Vercel only | ⚠️ Limited |
 | Local / offline | ✅ Fully local app | ❌ Cloud | ❌ Cloud | ❌ Cloud |
 | Models | ✅ 20+ (Claude, GPT, Gemini, Ollama…) | Claude only | GPT-4o | Multi-LLM |
-| Version history | ✅ Local SQLite snapshots | ❌ | ❌ | ❌ |
+| Version history | ✅ Local sessions + workspace files | ❌ | ❌ | ❌ |
 | Data privacy | ✅ On-device app state | ❌ Cloud-processed | ❌ Cloud | ❌ Cloud |
 | Editable export | ✅ HTML, PDF, PPTX, ZIP, Markdown | ⚠️ Limited | ⚠️ Limited | ⚠️ Limited |
 | Price | ✅ Free app, token cost only | 💳 Subscription | 💳 Subscription | 💳 Subscription |
@@ -134,17 +134,18 @@ Open source, desktop-native, and built for people who do not want their design w
 
 ### 1. Install
 
-**One-liner** (recommended):
+**Package manager** (recommended):
 
 ```bash
-# Windows
-winget install OpenCoworkAI.OpenCoDesign
-
 # macOS
 brew install --cask opencoworkai/tap/open-codesign
+
+# Windows — Scoop
+scoop bucket add opencoworkai https://github.com/OpenCoworkAI/scoop-bucket
+scoop install opencoworkai/open-codesign
 ```
 
-**Or direct download** (v0.1.x) from [GitHub Releases](https://github.com/OpenCoworkAI/open-codesign/releases):
+**Or direct download** from the [v0.2.0 GitHub Release](https://github.com/OpenCoworkAI/open-codesign/releases/tag/v0.2.0):
 
 | Platform | File |
 |---|---|
@@ -163,14 +164,16 @@ Each release ships with `SHA256SUMS.txt` and a CycloneDX SBOM (`*-sbom.cdx.json`
 
 | Manager | Command | Status |
 |---|---|---|
-| Scoop (Windows) | `scoop bucket add opencoworkai https://github.com/OpenCoworkAI/scoop-bucket && scoop install open-codesign` | 🟢 Live |
-| Flathub (Linux) | `flatpak install flathub ai.opencowork.codesign` | ⏸ Deferred to v0.2 (needs signed build + AppStream metadata) |
+| Homebrew Cask (macOS) | `brew install --cask opencoworkai/tap/open-codesign` | 🟢 Live |
+| Scoop (Windows) | `scoop bucket add opencoworkai https://github.com/OpenCoworkAI/scoop-bucket && scoop install opencoworkai/open-codesign` | 🟢 Live |
+| winget (Windows) | `winget install OpenCoworkAI.OpenCoDesign` | 🟡 PR submitted; waiting for Microsoft review |
+| Flathub (Linux) | `flatpak install flathub ai.opencowork.codesign` | ⏸ Deferred; needs signed build + AppStream metadata |
 | Snap (Linux) | `snap install --dangerous open-codesign-*.snap` | 🟡 Attached to releases best-effort; Snap Store publish not yet wired |
 
-After each tag push, CI auto-syncs SHAs back into `packaging/` and (once the winget PR merges) auto-opens downstream bumps. Every `packaging/*/README.md` documents its own mirror flow.
+After each stable tag push, CI syncs SHAs back into `packaging/` and publishes downstream Homebrew/Scoop updates when the repo secrets are configured. The first winget submission is in review; once Microsoft accepts the package, future winget bumps can be automated from the release workflow. Every `packaging/*/README.md` documents its own channel.
 </details>
 
-> **v0.1 note:** installers are unsigned. On **macOS Sequoia 15+** right-click → Open no longer bypasses Gatekeeper, and "Open Anyway" in System Settings often fails. Reliable one-liner:
+> **Unsigned installer note:** installers are not notarized or Authenticode-signed yet. On **macOS Sequoia 15+** right-click → Open no longer bypasses Gatekeeper, and "Open Anyway" in System Settings often fails. Reliable one-liner:
 >
 > ```sh
 > xattr -cr "/Applications/Open CoDesign.app"
@@ -249,24 +252,24 @@ Add a `SKILL.md` to any project to teach the model your own taste.
 
 ## Roadmap
 
-Current release: v0.1.4. The next release theme is locked: **Agentic Design**.
+Current release: v0.2.0. The current release theme is **Agentic Design**.
 
-### Now — v0.1.4 shipped
+### Now — v0.2.0 shipped
 
-- **AI image generation** — opt-in bitmap assets through OpenAI image models or OpenRouter image models
-- **ChatGPT Plus / Codex subscription login** — one-click OAuth for users who do not want to paste an API key
-- **CLIProxyAPI one-click import** — auto-detect a running local proxy and bring it into Settings
-- **API config hardening** — clearer relay diagnostics for timeouts, SSE truncation, missing `/models`, and incompatible Messages APIs
-
-### Next — v0.2.0 (Agentic Design)
-
-Expected in about a week. v0.2 turns Open CoDesign from a one-shot generator into a local design agent with a real workspace:
+v0.2 turns Open CoDesign from a one-shot generator into a local design agent with a real workspace:
 
 - **Design as session** — every design is a pi session with JSONL history and a workspace folder on disk
 - **Permissioned agent loop** — pi built-ins for read, write, edit, bash, grep, find, and ls, gated by Open CoDesign's permission UI
 - **Design tools on demand** — `ask`, `scaffold`, `skill`, `preview`, `gen_image`, `tweaks`, `todos`, and `done`
 - **`DESIGN.md` as shared memory** — brand tokens and design-system decisions become editable files, not model memory
 - **v0.1 migration path** — existing SQLite designs migrate into workspaces and session history
+
+### Previous — v0.1.4
+
+- **AI image generation** — opt-in bitmap assets through OpenAI image models or OpenRouter image models
+- **ChatGPT Plus / Codex subscription login** — one-click OAuth for users who do not want to paste an API key
+- **CLIProxyAPI one-click import** — auto-detect a running local proxy and bring it into Settings
+- **API config hardening** — clearer relay diagnostics for timeouts, SSE truncation, missing `/models`, and incompatible Messages APIs
 
 ### Later — v0.2.x and beyond
 
@@ -335,14 +338,14 @@ For Chinese-speaking users, we also keep a WeChat group for product updates, usa
   />
 </p>
 
-> ⚠️ The WeChat QR code rotates every 7 days and is currently valid until **May 4**.
+> ⚠️ The WeChat QR code rotates every 7 days and is currently valid until **May 16**.
 > If the code has expired, please leave a message in [GitHub Issues](https://github.com/OpenCoworkAI/open-codesign/issues) and we will refresh the image in-repo.
 
 See also the Chinese README: [README.zh-CN.md#社群](./README.zh-CN.md#%E7%A4%BE%E7%BE%A4).
 
 ## Contributing
 
-Read [CONTRIBUTING.md](./CONTRIBUTING.md). Open an issue before larger changes and run `pnpm lint && pnpm typecheck && pnpm test` before a PR.
+Read [CONTRIBUTING.md](./CONTRIBUTING.md). Open an issue before writing code and run `pnpm lint && pnpm typecheck && pnpm test` before a PR.
 
 ## License
 

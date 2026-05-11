@@ -2,7 +2,6 @@ import { useT } from '@open-codesign/i18n';
 import { Download, MessageSquare } from 'lucide-react';
 import { type ReactElement, useEffect, useRef, useState } from 'react';
 import type { ExportFormat } from '../../../preload/index';
-import type { PreviewViewport } from '../store';
 import { useCodesignStore } from '../store';
 
 interface ExportItem {
@@ -16,13 +15,14 @@ const ZOOM_OPTIONS = [50, 75, 90, 100, 110, 125, 150, 175, 200] as const;
 
 export function PreviewToolbar(): ReactElement {
   const t = useT();
-  const previewHtml = useCodesignStore((s) => s.previewHtml);
+  const previewSource = useCodesignStore((s) => s.previewSource);
   const exportActive = useCodesignStore((s) => s.exportActive);
   const toastMessage = useCodesignStore((s) => s.toastMessage);
   const dismissToast = useCodesignStore((s) => s.dismissToast);
-  const previewViewport = useCodesignStore((s) => s.previewViewport);
   const previewZoom = useCodesignStore((s) => s.previewZoom);
+  const previewZoomMode = useCodesignStore((s) => s.previewZoomMode);
   const setPreviewZoom = useCodesignStore((s) => s.setPreviewZoom);
+  const setPreviewZoomMode = useCodesignStore((s) => s.setPreviewZoomMode);
   const interactionMode = useCodesignStore((s) => s.interactionMode);
   const setInteractionMode = useCodesignStore((s) => s.setInteractionMode);
   const [open, setOpen] = useState(false);
@@ -54,7 +54,7 @@ export function PreviewToolbar(): ReactElement {
     return () => clearTimeout(timeout);
   }, [toastMessage, dismissToast]);
 
-  const disabled = !previewHtml;
+  const disabled = !previewSource;
   const commentActive = interactionMode === 'comment';
   const exportItems: ExportItem[] = [
     {
@@ -90,7 +90,7 @@ export function PreviewToolbar(): ReactElement {
   ];
 
   return (
-    <div className="ml-auto flex items-center justify-end gap-[var(--space-1)] pr-[var(--space-4)] py-[3px]">
+    <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-[var(--space-1)] pr-[var(--space-4)] py-[3px]">
       {toastMessage && (
         <output className="mr-auto text-[var(--text-xs)] text-[var(--color-text-secondary)] truncate max-w-[60%]">
           {toastMessage}
@@ -102,7 +102,7 @@ export function PreviewToolbar(): ReactElement {
         disabled={disabled}
         aria-pressed={commentActive}
         onClick={() => setInteractionMode(commentActive ? 'default' : 'comment')}
-        className={`inline-flex items-center gap-[6px] h-[26px] px-[10px] text-[12px] transition-[background-color,color,transform] duration-[var(--duration-faster)] active:scale-[var(--scale-press-down)] disabled:opacity-40 disabled:pointer-events-none ${
+        className={`inline-flex h-[28px] items-center gap-[6px] rounded-[var(--radius-sm)] px-[10px] text-[12px] whitespace-nowrap transition-[background-color,color,transform] duration-[var(--duration-faster)] active:scale-[var(--scale-press-down)] disabled:opacity-40 disabled:pointer-events-none ${
           commentActive
             ? 'text-[var(--color-accent)]'
             : 'text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)]'
@@ -117,20 +117,34 @@ export function PreviewToolbar(): ReactElement {
           type="button"
           disabled={disabled}
           onClick={() => setZoomOpen((v) => !v)}
-          className="inline-flex items-center justify-end w-[56px] h-[26px] pr-[10px] text-[12px] tabular-nums text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] disabled:opacity-40 disabled:pointer-events-none transition-[background-color,color,transform] duration-[var(--duration-faster)] active:scale-[var(--scale-press-down)]"
+          className="inline-flex h-[28px] min-w-[76px] items-center justify-center rounded-[var(--radius-sm)] px-[10px] text-[12px] tabular-nums text-[var(--color-text-secondary)] whitespace-nowrap hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] disabled:opacity-40 disabled:pointer-events-none transition-[background-color,color,transform] duration-[var(--duration-faster)] active:scale-[var(--scale-press-down)]"
           aria-haspopup="menu"
           aria-expanded={zoomOpen}
           aria-label={t('preview.zoom')}
           style={{ fontFamily: 'var(--font-mono)', fontFeatureSettings: "'tnum'" }}
         >
-          {previewZoom}%
+          {previewZoomMode === 'fit'
+            ? `${t('preview.zoomFit')} ${previewZoom}%`
+            : `${previewZoom}%`}
         </button>
 
         {zoomOpen && (
           <div
             role="menu"
-            className="absolute right-0 top-full mt-[var(--space-1_5)] w-[56px] rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-elevated)] p-[var(--space-1)] z-10"
+            className="absolute right-0 top-full mt-[var(--space-1_5)] w-[96px] rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--shadow-elevated)] p-[var(--space-1)] z-10"
           >
+            <button
+              type="button"
+              role="menuitemradio"
+              aria-checked={previewZoomMode === 'fit'}
+              onClick={() => {
+                setPreviewZoomMode('fit');
+                setZoomOpen(false);
+              }}
+              className={`block w-full rounded-[var(--radius-sm)] px-[var(--space-2)] py-[var(--space-1)] text-left text-[12px] transition-colors duration-100 hover:bg-[var(--color-surface-hover)] ${previewZoomMode === 'fit' ? 'text-[var(--color-accent)] font-medium' : 'text-[var(--color-text-primary)]'}`}
+            >
+              {t('preview.zoomFit')}
+            </button>
             {ZOOM_OPTIONS.map((value) => (
               <button
                 key={value}
@@ -141,7 +155,7 @@ export function PreviewToolbar(): ReactElement {
                   setPreviewZoom(value);
                   setZoomOpen(false);
                 }}
-                className={`block w-full pr-[10px] py-[var(--space-1)] text-[12px] text-right rounded-[var(--radius-sm)] tabular-nums transition-colors duration-100 hover:bg-[var(--color-surface-hover)] ${previewZoom === value ? 'text-[var(--color-accent)] font-medium' : 'text-[var(--color-text-primary)]'}`}
+                className={`block w-full rounded-[var(--radius-sm)] py-[var(--space-1)] pr-[10px] text-right text-[12px] tabular-nums transition-colors duration-100 hover:bg-[var(--color-surface-hover)] ${previewZoomMode === 'manual' && previewZoom === value ? 'text-[var(--color-accent)] font-medium' : 'text-[var(--color-text-primary)]'}`}
                 style={{ fontFamily: 'var(--font-mono)', fontFeatureSettings: "'tnum'" }}
               >
                 {value}%
@@ -156,12 +170,13 @@ export function PreviewToolbar(): ReactElement {
           type="button"
           disabled={disabled}
           onClick={() => setOpen((v) => !v)}
-          className="inline-flex items-center gap-[6px] h-[26px] px-[10px] text-[12px] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] disabled:opacity-40 disabled:pointer-events-none transition-[background-color,color,transform] duration-[var(--duration-faster)] active:scale-[var(--scale-press-down)]"
+          title={t('export.button')}
+          aria-label={t('export.button')}
+          className="inline-flex h-[28px] items-center gap-[6px] rounded-[var(--radius-sm)] px-[10px] text-[12px] text-[var(--color-text-secondary)] whitespace-nowrap hover:text-[var(--color-text-primary)] hover:bg-[var(--color-surface-hover)] disabled:opacity-40 disabled:pointer-events-none transition-[background-color,color,transform] duration-[var(--duration-faster)] active:scale-[var(--scale-press-down)]"
           aria-haspopup="menu"
           aria-expanded={open}
         >
           <Download className="w-3.5 h-3.5" aria-hidden="true" />
-          {t('export.button')}
         </button>
 
         {open && (

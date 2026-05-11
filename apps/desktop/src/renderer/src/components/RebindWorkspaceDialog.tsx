@@ -11,7 +11,7 @@ export function RebindWorkspaceDialog() {
 
   if (!pending) return null;
 
-  const { design, newPath } = pending;
+  const { newPath } = pending;
 
   async function handleSwitchOnly() {
     setIsLoading(true);

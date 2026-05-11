@@ -16,10 +16,11 @@ import type {
   LocalInputFile,
   ModelRef,
   OnboardingState,
-  ProviderEntry,
+  PreviewMode,
   ReasoningLevel,
   ReportEventInput,
   ReportEventResult,
+  ResourceStateV1,
   SelectedElement,
   SnapshotCreateInput,
   SupportedOnboardingProvider,
@@ -35,10 +36,17 @@ import type {
 } from '../main/connection-ipc';
 import type { ImageGenerationSettingsView } from '../main/image-generation-settings';
 
-export type { ConnectionTestError, ConnectionTestResult, ModelsListResponse, TestEndpointResponse };
-export type { ClaudeCodeUserType, ExternalConfigsDetection };
-export type { CodexOAuthStatus };
-export type { ImageGenerationSettingsView };
+export type {
+  ClaudeCodeUserType,
+  CodexOAuthStatus,
+  ConnectionTestError,
+  ConnectionTestResult,
+  ExternalConfigsDetection,
+  ImageGenerationSettingsView,
+  ModelsListResponse,
+  PreviewMode,
+  TestEndpointResponse,
+};
 
 export interface ValidateKeyResult {
   ok: true;
@@ -46,15 +54,140 @@ export interface ValidateKeyResult {
 }
 export interface ValidateKeyError {
   ok: false;
-  code: '401' | '402' | '429' | 'network';
+  code: '401' | '402' | '429' | 'network' | 'parse';
   message: string;
 }
 
 export type ExportFormat = 'html' | 'pdf' | 'pptx' | 'zip' | 'markdown';
+export type WorkspaceFileKind =
+  | 'html'
+  | 'jsx'
+  | 'tsx'
+  | 'css'
+  | 'js'
+  | 'markdown'
+  | 'text'
+  | 'image'
+  | 'font'
+  | 'video'
+  | 'audio'
+  | 'pdf'
+  | 'document'
+  | 'design-system'
+  | 'asset';
+export interface WorkspaceFileEntry {
+  path: string;
+  kind: WorkspaceFileKind;
+  size: number;
+  updatedAt: string;
+}
+export interface WorkspaceDirectoryEntry {
+  path: string;
+  name: string;
+  type: 'file' | 'directory';
+  kind?: WorkspaceFileKind;
+  size?: number;
+  updatedAt?: string;
+}
+export interface WorkspaceFileReadResult extends WorkspaceFileEntry {
+  content: string;
+}
+export type WorkspaceDocumentPreviewFormat =
+  | 'doc'
+  | 'docx'
+  | 'ppt'
+  | 'pptx'
+  | 'rtf'
+  | 'xls'
+  | 'xlsx'
+  | 'unknown';
+export interface WorkspaceDocumentPreviewStat {
+  label: string;
+  value: string;
+}
+export interface WorkspaceDocumentPreviewSection {
+  title: string;
+  lines: string[];
+}
+export interface WorkspaceDocumentPreviewResult {
+  schemaVersion: 1;
+  path: string;
+  fileName: string;
+  format: WorkspaceDocumentPreviewFormat;
+  title: string;
+  size: number;
+  updatedAt: string;
+  stats: WorkspaceDocumentPreviewStat[];
+  sections: WorkspaceDocumentPreviewSection[];
+  thumbnailDataUrl?: string;
+}
+export interface WorkspaceDocumentThumbnailResult {
+  schemaVersion: 1;
+  path: string;
+  thumbnailDataUrl: string | null;
+}
+
+export interface PreviewDetectCandidate {
+  url: string;
+  source: string;
+  status: 'matched' | 'native-runtime-required' | 'not-preview' | 'unreachable';
+  httpStatus?: number;
+  contentType?: string;
+  title?: string;
+  error?: string;
+}
+
+export interface PreviewDetectResult {
+  schemaVersion: 1;
+  found: boolean;
+  url: string | null;
+  candidates: PreviewDetectCandidate[];
+  message: string;
+}
+
+export type WorkspaceImportSource = 'composer' | 'workspace' | 'canvas' | 'clipboard';
+export type WorkspaceImportKind = 'reference' | 'asset';
+export interface WorkspaceImportFileInput {
+  path: string;
+  name?: string;
+  size?: number;
+}
+export interface WorkspaceImportBlobInput {
+  name?: string;
+  mediaType: string;
+  dataBase64: string;
+}
+export interface WorkspaceImportResult {
+  path: string;
+  absolutePath: string;
+  name: string;
+  size: number;
+  mediaType: string;
+  kind: WorkspaceImportKind;
+  source: WorkspaceImportSource;
+}
+
+export interface RenameDesignOptions {
+  renameWorkspace?: boolean;
+}
+
+export interface CreateDesignOptions {
+  workspaceReuse?: 'fresh-conversation';
+}
+
 export interface ExportInvokeResponse {
   status: 'saved' | 'cancelled';
   path?: string;
   bytes?: number;
+}
+export interface ExportInvokePayload {
+  format: ExportFormat;
+  artifactSource: string;
+  defaultFilename?: string;
+  designId?: string;
+  designName?: string;
+  workspacePath?: string;
+  sourcePath?: string;
 }
 
 export interface ProviderRow {
@@ -98,6 +231,9 @@ export interface GenerateArtifact {
   title: string;
   content: string;
   designParams: unknown[];
+  sourceFormat?: 'jsx' | 'html' | 'svg' | 'markdown';
+  renderRuntime?: 'react' | 'static-html' | 'svg' | 'none';
+  entryPath?: string;
   createdAt: string;
 }
 
@@ -107,6 +243,7 @@ export interface GenerateResponse {
   inputTokens: number;
   outputTokens: number;
   costUsd: number;
+  resourceState?: ResourceStateV1;
 }
 
 export interface Preferences {
@@ -115,14 +252,30 @@ export interface Preferences {
   checkForUpdatesOnStartup: boolean;
   dismissedUpdateVersion: string;
   diagnosticsLastReadTs: number;
+  memoryEnabled: boolean;
+  workspaceMemoryAutoUpdate: boolean;
+  userMemoryAutoUpdate: boolean;
+}
+
+export interface MemoryFileRead {
+  content: string;
+  path: string;
+  hash: string;
+  mtimeMs: number;
+  updatedAt: string;
+  source: 'primary' | 'legacy' | 'user';
+}
+
+export interface UserMemoryConsolidationResult {
+  updated: boolean;
+  candidateCount: number;
 }
 
 /**
- * Streaming events emitted by the (future) Agent runtime. Phase 1 emits
- * turn_start / text_delta / turn_end. Phase 2 adds tool_call_*. Kept
- * deliberately loose so Workstream B can evolve the shape without a
- * lockstep change here — useAgentStream in the renderer tolerates unknown
- * event types by ignoring them.
+ * Streaming events emitted by the live agent runtime. Kept deliberately loose
+ * so the core event shape can evolve without a lockstep preload change —
+ * useAgentStream in the renderer tolerates unknown event types by ignoring
+ * them.
  */
 export interface AgentStreamEvent {
   type:
@@ -151,10 +304,13 @@ export interface AgentStreamEvent {
   args?: Record<string, unknown>;
   verbGroup?: string;
   toolCallId?: string;
-  // tool_call_result
+  // Completed host-side activity may arrive as a single tool_call_start event
+  // after the agent run has ended.
   result?: unknown;
   durationMs?: number;
-  // fs_updated — emitted whenever the agent's text_editor mutates a file in the
+  status?: 'done' | 'error';
+  // tool_call_result
+  // fs_updated — emitted whenever the agent edit tool mutates a file in the
   // virtual fs. Renderer uses this to re-render the iframe live during
   // generation so the user can watch the design take shape.
   path?: string;
@@ -162,6 +318,92 @@ export interface AgentStreamEvent {
   // error
   message?: string;
   code?: string;
+}
+
+export interface GenerationStatusResult {
+  schemaVersion: 1;
+  running: Array<{ designId: string; generationId: string; startedAt: number }>;
+}
+
+/**
+ * Ask-tool wire shape. Mirrors packages/core/src/tools/ask.ts — duplicated
+ * here so the preload does not take a hard dep on `@open-codesign/core`.
+ * Keep in lockstep with the TypeBox schema in that file.
+ */
+export type AskQuestionType = 'text-options' | 'svg-options' | 'slider' | 'file' | 'freeform';
+export interface AskTextOptionsQuestion {
+  id: string;
+  type: 'text-options';
+  prompt: string;
+  options: string[];
+  multi?: boolean;
+}
+export interface AskSvgOptionsQuestion {
+  id: string;
+  type: 'svg-options';
+  prompt: string;
+  options: Array<{ id: string; label: string; svg: string }>;
+}
+export interface AskSliderQuestion {
+  id: string;
+  type: 'slider';
+  prompt: string;
+  min: number;
+  max: number;
+  step: number;
+  default?: number;
+  unit?: string;
+}
+export interface AskFileQuestion {
+  id: string;
+  type: 'file';
+  prompt: string;
+  accept?: string[];
+  multiple?: boolean;
+}
+export interface AskFreeformQuestion {
+  id: string;
+  type: 'freeform';
+  prompt: string;
+  placeholder?: string;
+  multiline?: boolean;
+}
+export type AskQuestion =
+  | AskTextOptionsQuestion
+  | AskSvgOptionsQuestion
+  | AskSliderQuestion
+  | AskFileQuestion
+  | AskFreeformQuestion;
+export interface AskInput {
+  questions: AskQuestion[];
+  rationale?: string;
+}
+export interface AskAnswer {
+  questionId: string;
+  value: string | number | string[] | null;
+}
+export interface AskResult {
+  status: 'answered' | 'cancelled';
+  answers: AskAnswer[];
+}
+export interface AskRequest {
+  requestId: string;
+  sessionId: string;
+  input: AskInput;
+}
+
+export type ExternalResourcePermissionScope = 'deny' | 'once' | 'always';
+export type ExternalResourceKind = 'font' | 'image' | 'svg' | 'other-asset';
+export interface ExternalResourcePermissionRequest {
+  requestId: string;
+  sessionId: string;
+  url: string;
+  origin: string;
+  kind: ExternalResourceKind;
+  destinationPath: string;
+  usage: string;
+  sourceName?: string | undefined;
+  licenseLabel?: string | undefined;
 }
 
 const api = {
@@ -179,8 +421,8 @@ const api = {
     referenceUrl?: string;
     attachments: LocalInputFile[];
     generationId: string;
-    designId?: string;
-    previousHtml?: string;
+    designId: string;
+    previousSource?: string;
   }) =>
     ipcRenderer.invoke('codesign:v1:generate', {
       schemaVersion: 1,
@@ -191,10 +433,14 @@ const api = {
       schemaVersion: 1,
       generationId,
     } satisfies CancelGenerationPayloadV1),
+  generationStatus: () =>
+    ipcRenderer.invoke('codesign:v1:generation-status') as Promise<GenerationStatusResult>,
   generateTitle: (prompt: string) =>
     ipcRenderer.invoke('codesign:v1:generate-title', { prompt }) as Promise<string>,
   applyComment: (payload: {
-    html: string;
+    designId: string;
+    generationId: string;
+    artifactSource: string;
     comment: string;
     selection: SelectedElement;
     model?: ModelRef;
@@ -207,7 +453,7 @@ const api = {
     ipcRenderer.invoke('codesign:pick-design-system-directory') as Promise<OnboardingState>,
   clearDesignSystem: () =>
     ipcRenderer.invoke('codesign:clear-design-system') as Promise<OnboardingState>,
-  export: (payload: { format: ExportFormat; htmlContent: string; defaultFilename?: string }) =>
+  export: (payload: ExportInvokePayload) =>
     ipcRenderer.invoke('codesign:export', payload) as Promise<ExportInvokeResponse>,
   locale: {
     getSystem: () => ipcRenderer.invoke('locale:get-system') as Promise<string>,
@@ -257,6 +503,8 @@ const api = {
       ipcRenderer.invoke('settings:v1:choose-storage-folder', kind) as Promise<AppPaths>,
     openFolder: (path: string) =>
       ipcRenderer.invoke('settings:v1:open-folder', path) as Promise<void>,
+    openTemplatesFolder: () =>
+      ipcRenderer.invoke('codesign:v1:open-templates-folder') as Promise<void>,
     resetOnboarding: () => ipcRenderer.invoke('settings:v1:reset-onboarding') as Promise<void>,
     toggleDevtools: () => ipcRenderer.invoke('settings:v1:toggle-devtools') as Promise<void>,
     validateKey: (input: {
@@ -319,6 +567,7 @@ const api = {
       baseUrl: string;
       apiKey: string;
       httpHeaders?: Record<string, string>;
+      allowPrivateNetwork?: boolean;
     }) => ipcRenderer.invoke('config:v1:test-endpoint', input) as Promise<TestEndpointResponse>,
     listEndpointModels: (input: { wire: WireApi; baseUrl: string; apiKey: string }) =>
       ipcRenderer.invoke('config:v1:list-endpoint-models', input) as Promise<
@@ -340,6 +589,16 @@ const api = {
     update: (patch: Partial<Preferences>) =>
       ipcRenderer.invoke('preferences:v1:update', patch) as Promise<Preferences>,
   },
+  memory: {
+    getUser: () => ipcRenderer.invoke('memory:v1:get-user') as Promise<MemoryFileRead | null>,
+    updateUser: (content: string) =>
+      ipcRenderer.invoke('memory:v1:update-user', content) as Promise<MemoryFileRead | null>,
+    openUserMemory: () => ipcRenderer.invoke('memory:v1:open-user') as Promise<void>,
+    consolidateUserMemoryNow: () =>
+      ipcRenderer.invoke('memory:v1:consolidate-user') as Promise<UserMemoryConsolidationResult>,
+    clearUserMemoryCandidates: () =>
+      ipcRenderer.invoke('memory:v1:clear-user-candidates') as Promise<void>,
+  },
   imageGeneration: {
     get: () =>
       ipcRenderer.invoke('image-generation:v1:get') as Promise<ImageGenerationSettingsView>,
@@ -356,11 +615,7 @@ const api = {
     logout: () => ipcRenderer.invoke('codex-oauth:v1:logout') as Promise<CodexOAuthStatus>,
   },
   connection: {
-    test: (input: {
-      provider: SupportedOnboardingProvider;
-      apiKey: string;
-      baseUrl: string;
-    }) =>
+    test: (input: { provider: SupportedOnboardingProvider; apiKey: string; baseUrl: string }) =>
       ipcRenderer.invoke('connection:v1:test', input) as Promise<
         ConnectionTestResult | ConnectionTestError
       >,
@@ -374,11 +629,8 @@ const api = {
       >,
   },
   models: {
-    list: (input: {
-      provider: SupportedOnboardingProvider;
-      apiKey: string;
-      baseUrl: string;
-    }) => ipcRenderer.invoke('models:v1:list', input) as Promise<ModelsListResponse>,
+    list: (input: { provider: SupportedOnboardingProvider; apiKey: string; baseUrl: string }) =>
+      ipcRenderer.invoke('models:v1:list', input) as Promise<ModelsListResponse>,
     listForProvider: (providerId: string) =>
       ipcRenderer.invoke('models:v1:list-for-provider', providerId) as Promise<ModelsListResponse>,
   },
@@ -388,24 +640,95 @@ const api = {
         { ok: true; models: string[] } | { ok: false; code: string; message: string }
       >,
   },
+  files: {
+    list: (designId: string) =>
+      ipcRenderer.invoke('codesign:files:v1:list', {
+        schemaVersion: 1,
+        designId,
+      }) as Promise<WorkspaceFileEntry[]>,
+    listDir: (designId: string, path = '.') =>
+      ipcRenderer.invoke('codesign:files:v1:list-dir', {
+        schemaVersion: 1,
+        designId,
+        path,
+      }) as Promise<WorkspaceDirectoryEntry[]>,
+    read: (designId: string, path: string) =>
+      ipcRenderer.invoke('codesign:files:v1:read', {
+        schemaVersion: 1,
+        designId,
+        path,
+      }) as Promise<WorkspaceFileReadResult>,
+    preview: (designId: string, path: string) =>
+      ipcRenderer.invoke('codesign:files:v1:preview', {
+        schemaVersion: 1,
+        designId,
+        path,
+      }) as Promise<WorkspaceDocumentPreviewResult>,
+    thumbnail: (designId: string, path: string) =>
+      ipcRenderer.invoke('codesign:files:v1:thumbnail', {
+        schemaVersion: 1,
+        designId,
+        path,
+      }) as Promise<WorkspaceDocumentThumbnailResult>,
+    write: (designId: string, path: string, content: string) =>
+      ipcRenderer.invoke('codesign:files:v1:write', {
+        schemaVersion: 1,
+        designId,
+        path,
+        content,
+      }) as Promise<WorkspaceFileReadResult>,
+    importToWorkspace: (input: {
+      designId: string;
+      source: WorkspaceImportSource;
+      files?: WorkspaceImportFileInput[];
+      blobs?: WorkspaceImportBlobInput[];
+      timestamp?: string;
+    }) =>
+      ipcRenderer.invoke('codesign:files:v1:import-to-workspace', {
+        schemaVersion: 1,
+        ...input,
+      }) as Promise<WorkspaceImportResult[]>,
+    subscribe: (designId: string) =>
+      ipcRenderer.invoke('codesign:files:v1:subscribe', {
+        schemaVersion: 1,
+        designId,
+      }) as Promise<{ ok: true }>,
+    unsubscribe: (designId: string) =>
+      ipcRenderer.invoke('codesign:files:v1:unsubscribe', {
+        schemaVersion: 1,
+        designId,
+      }) as Promise<{ ok: true }>,
+    onChanged: (cb: (event: { schemaVersion: 1; designId: string }) => void) => {
+      const listener = (_e: unknown, event: { schemaVersion: 1; designId: string }) => cb(event);
+      ipcRenderer.on('codesign:files:v1:changed', listener);
+      return () => ipcRenderer.removeListener('codesign:files:v1:changed', listener);
+    },
+  },
   snapshots: {
     listDesigns: () =>
       ipcRenderer.invoke('snapshots:v1:list-designs', { schemaVersion: 1 }) as Promise<Design[]>,
-    createDesign: (name: string) =>
+    createDesign: (name: string, workspacePath?: string | null, options?: CreateDesignOptions) =>
       ipcRenderer.invoke('snapshots:v1:create-design', {
         schemaVersion: 1,
         name,
+        ...(workspacePath !== undefined ? { workspacePath } : {}),
+        ...(options?.workspaceReuse !== undefined
+          ? { workspaceReuse: options.workspaceReuse }
+          : {}),
       }) as Promise<Design>,
     getDesign: (id: string) =>
       ipcRenderer.invoke('snapshots:v1:get-design', {
         schemaVersion: 1,
         id,
       }) as Promise<Design | null>,
-    renameDesign: (id: string, name: string) =>
+    renameDesign: (id: string, name: string, options?: RenameDesignOptions) =>
       ipcRenderer.invoke('snapshots:v1:rename-design', {
         schemaVersion: 1,
         id,
         name,
+        ...(options?.renameWorkspace !== undefined
+          ? { renameWorkspace: options.renameWorkspace }
+          : {}),
       }) as Promise<Design>,
     setThumbnail: (id: string, thumbnailText: string | null) =>
       ipcRenderer.invoke('snapshots:v1:set-thumbnail', {
@@ -444,7 +767,7 @@ const api = {
       ipcRenderer.invoke('snapshots:v1:workspace:pick', {
         schemaVersion: 1,
       }) as Promise<string | null>,
-    updateWorkspace: (designId: string, workspacePath: string | null, migrateFiles: boolean) =>
+    updateWorkspace: (designId: string, workspacePath: string, migrateFiles: boolean) =>
       ipcRenderer.invoke('snapshots:v1:workspace:update', {
         schemaVersion: 1,
         designId,
@@ -461,12 +784,25 @@ const api = {
         schemaVersion: 1,
         designId,
       }) as Promise<{ exists: boolean }>,
+    updatePreview: (designId: string, previewMode: PreviewMode, previewUrl?: string | null) =>
+      ipcRenderer.invoke('snapshots:v1:preview:update', {
+        schemaVersion: 1,
+        designId,
+        previewMode,
+        previewUrl: previewUrl ?? null,
+      }) as Promise<Design>,
+    detectPreview: (designId: string) =>
+      ipcRenderer.invoke('snapshots:v1:preview:detect', {
+        schemaVersion: 1,
+        designId,
+      }) as Promise<PreviewDetectResult>,
   },
   chat: {
     list: (designId: string) =>
-      ipcRenderer.invoke('chat:v1:list', { schemaVersion: 1, designId }) as Promise<
-        ChatMessageRow[]
-      >,
+      ipcRenderer.invoke('chat:v1:list', {
+        schemaVersion: 1,
+        designId,
+      }) as Promise<ChatMessageRow[]>,
     append: (input: ChatAppendInput) =>
       ipcRenderer.invoke('chat:v1:append', {
         schemaVersion: 1,
@@ -477,15 +813,17 @@ const api = {
         schemaVersion: 1,
         designId,
       }) as Promise<{ inserted: number }>,
-    updateToolStatus: (input: {
+    updateToolStatus: (_input: {
       designId: string;
       seq: number;
       status: 'done' | 'error';
+      result?: unknown;
+      durationMs?: number;
       errorMessage?: string;
     }) =>
-      ipcRenderer.invoke('chat:update-tool-status:v1', {
+      ipcRenderer.invoke('chat:v1:update-tool-status', {
         schemaVersion: 1,
-        ...input,
+        ..._input,
       }) as Promise<{ ok: true }>,
     onAgentEvent: (cb: (event: AgentStreamEvent) => void) => {
       const listener = (_e: unknown, event: AgentStreamEvent) => cb(event);
@@ -510,20 +848,23 @@ const api = {
         schemaVersion: 1,
         designId,
       }) as Promise<CommentRow[]>,
-    update: (id: string, patch: { text?: string; status?: CommentStatus }) =>
+    update: (designId: string, id: string, patch: { text?: string; status?: CommentStatus }) =>
       ipcRenderer.invoke('comments:v1:update', {
         schemaVersion: 1,
+        designId,
         id,
-        ...patch,
+        patch,
       }) as Promise<CommentRow | null>,
-    remove: (id: string) =>
+    remove: (designId: string, id: string) =>
       ipcRenderer.invoke('comments:v1:remove', {
         schemaVersion: 1,
+        designId,
         id,
       }) as Promise<{ removed: boolean }>,
-    markApplied: (ids: string[], snapshotId: string) =>
+    markApplied: (designId: string, ids: string[], snapshotId: string) =>
       ipcRenderer.invoke('comments:v1:mark-applied', {
         schemaVersion: 1,
+        designId,
         ids,
         snapshotId,
       }) as Promise<CommentRow[]>,
@@ -572,6 +913,28 @@ const api = {
   },
   openExternal: (url: string) =>
     ipcRenderer.invoke('codesign:v1:open-external', url) as Promise<void>,
+  ask: {
+    pending: () => ipcRenderer.invoke('ask:list-pending') as Promise<AskRequest[]>,
+    onRequest: (cb: (req: AskRequest) => void) => {
+      const listener = (_e: unknown, req: AskRequest) => cb(req);
+      ipcRenderer.on('ask:request', listener);
+      return () => ipcRenderer.removeListener('ask:request', listener);
+    },
+    resolve: (requestId: string, result: AskResult) =>
+      ipcRenderer.invoke('ask:resolve', { requestId, ...result }) as Promise<void>,
+  },
+  externalResourcePermission: {
+    onRequest: (cb: (req: ExternalResourcePermissionRequest) => void) => {
+      const listener = (_e: unknown, req: ExternalResourcePermissionRequest) => cb(req);
+      ipcRenderer.on('external-resource-permission:request', listener);
+      return () => ipcRenderer.removeListener('external-resource-permission:request', listener);
+    },
+    resolve: (requestId: string, scope: ExternalResourcePermissionScope) =>
+      ipcRenderer.invoke('external-resource-permission:resolve', {
+        requestId,
+        scope,
+      }) as Promise<void>,
+  },
 };
 
 contextBridge.exposeInMainWorld('codesign', api);

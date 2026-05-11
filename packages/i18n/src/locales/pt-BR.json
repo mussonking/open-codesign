@@ -21,6 +21,10 @@
     "applied": "Aplicado.",
     "working": "Trabalhando"
   },
+  "ask": {
+    "title": "Esclarecimento rápido",
+    "submit": "Responder"
+  },
   "toast": {
     "error": {
       "report": "Reportar"
@@ -38,10 +42,29 @@
     "tokens": "{{count}} tokens"
   },
   "canvas": {
+    "previewTab": "Pré-visualização",
     "filesTab": "Arquivos",
     "filesTabEmpty": "Nenhum arquivo ainda",
     "openInTab": "Abrir em nova aba",
     "previewHint": "Pré-visualização em miniatura · clique duas vezes no arquivo ou use Abrir em nova aba para ver em tela cheia",
+    "documentPreview": {
+      "previewLabel": "Prévia do documento",
+      "loading": "Preparando prévia…",
+      "unavailable": "Prévia do documento indisponível",
+      "empty": "Nenhum texto extraível foi encontrado neste documento.",
+      "thumbnailAlt": "Prévia de {{name}}",
+      "section": {
+        "document": "Texto do documento",
+        "workbook": "Texto da planilha"
+      },
+      "stats": {
+        "author": "Autor",
+        "pages": "Páginas",
+        "slides": "Slides",
+        "words": "Palavras",
+        "worksheets": "Planilhas"
+      }
+    },
     "tabsAriaLabel": "Arquivos abertos",
     "closeTab": "Fechar {{name}}",
     "files": {
@@ -59,7 +82,7 @@
     "workspace": {
       "sectionTitle": "Espaço de trabalho",
       "label": "Pasta",
-      "default": "Armazenamento interno padrão",
+      "default": "Nenhum espaço de trabalho vinculado",
       "choose": "Escolher pasta",
       "change": "Alterar",
       "open": "Abrir pasta",
@@ -72,7 +95,60 @@
       "rebindDescription": "Este design já tem uma pasta de espaço de trabalho. Escolha como prosseguir:",
       "rebindCancel": "Cancelar",
       "rebindSwitchOnly": "Alternar sem copiar",
-      "rebindSwitchAndCopy": "Alternar e copiar arquivos"
+      "rebindSwitchAndCopy": "Alternar e copiar arquivos",
+      "preview": {
+        "label": "Prévia",
+        "detect": "Detectar",
+        "apply": "Aplicar URL da prévia",
+        "reload": "Recarregar prévia",
+        "openConnected": "Abrir",
+        "openFailed": "Não foi possível abrir a prévia",
+        "saveFailed": "Não foi possível atualizar a prévia",
+        "detectFailed": "Não foi possível detectar a prévia",
+        "detectNone": "Nenhuma prévia em execução encontrada",
+        "urlLabel": "URL da prévia",
+        "urlPlaceholder": "localhost:5173",
+        "urlRequired": "Informe primeiro uma URL local de prévia.",
+        "urlInvalid": "Informe uma URL http ou https válida.",
+        "actions": {
+          "showOptions": "Mostrar opções da prévia",
+          "hideOptions": "Ocultar opções da prévia"
+        },
+        "status": {
+          "saved": "Salva",
+          "auto": "Auto"
+        },
+        "mode": {
+          "label": "Modo",
+          "integrated": "Arquivo integrado",
+          "integratedShort": "Integrada",
+          "connectedUrl": "URL conectada",
+          "connectedUrlShort": "Conectada",
+          "externalApp": "App externo",
+          "externalAppShort": "Externa",
+          "off": "Desativada",
+          "offShort": "Off"
+        },
+        "summary": {
+          "detecting": "Procurando uma prévia local em execução.",
+          "integrated": "Renderizando arquivos do espaço de trabalho dentro do Open CoDesign.",
+          "integratedBlocked": "Este espaço parece um app; use o próprio servidor de desenvolvimento dele para prévia.",
+          "connected": "Prévia de {{url}}.",
+          "waitingUrl": "Informe a URL local da prévia em execução.",
+          "external": "Use a própria janela de prévia do app.",
+          "externalWithUrl": "Prévia externa configurada em {{url}}.",
+          "off": "A prévia está desativada para este espaço."
+        },
+        "hint": {
+          "appWorkspace": "Espaços de app normalmente funcionam melhor no próprio servidor de desenvolvimento ou janela.",
+          "simpleWorkspace": "A prévia integrada renderiza App.jsx ou index.html dentro do Open CoDesign."
+        },
+        "placeholder": {
+          "off": "A prévia está desativada para este espaço.",
+          "external": "Este espaço deve ser pré-visualizado na própria janela do app ou navegador.",
+          "devServerRequired": "Este arquivo e uma entrada de app. Inicie o servidor de desenvolvimento e use Detect ou Connected URL para a previa."
+        }
+      }
     },
     "rail": {
       "title": "Arquivos",
@@ -104,7 +180,13 @@
     "commentModeHint": "Clique em qualquer elemento para comentar",
     "runtimeError": "Erro de execução na pré-visualização",
     "dismissErrors": "Dispensar erros da pré-visualização",
-    "zoom": "Zoom"
+    "zoom": "Zoom",
+    "zoomFit": "Ajustar",
+    "viewport": {
+      "desktop": "Prévia desktop",
+      "tablet": "Prévia tablet",
+      "mobile": "Prévia mobile"
+    }
   },
   "tweaks": {
     "title": "Ajustes",
@@ -115,6 +197,31 @@
     "swatchAria": "Cor {{key}}",
     "emptyTitle": "Nenhum token ajustável",
     "emptyHint": "O agente ainda não declarou um bloco EDITMODE. Gerações futuras disponibilizarão tokens de design aqui."
+  },
+  "inspector": {
+    "title": "Inspector",
+    "close": "Fechar inspector",
+    "panels": {
+      "tweaks": "Ajustes",
+      "comments": "Comentários",
+      "selection": "Seleção",
+      "run": "Execução"
+    },
+    "empty": {
+      "tweaks": "Ainda não há pré-visualização para ajustar.",
+      "selection": "Selecione um elemento no modo comentário para inspecioná-lo."
+    },
+    "comments": {
+      "enterMode": "Comentar na pré-visualização"
+    },
+    "selection": {
+      "target": "Alvo"
+    },
+    "run": {
+      "status": "Status",
+      "id": "ID da execução",
+      "tokens": "Tokens"
+    }
   },
   "chat": {
     "placeholder": "Descreva o que quer criar…",
@@ -177,6 +284,7 @@
     "tabs": {
       "models": "Modelos",
       "appearance": "Aparência",
+      "workspace": "Espaço e arquivos",
       "storage": "Armazenamento",
       "diagnostics": "Diagnóstico",
       "advanced": "Avançado"
@@ -197,7 +305,7 @@
       "sectionTitle": "Provedores de API",
       "chatgptLogin": {
         "title": "Entrar com assinatura do ChatGPT",
-        "description": "Use a cota do seu plano ChatGPT Plus / Pro / Team para chamar modelos Codex (gpt-5.3-codex e afins) — sem precisar de chave de API.",
+        "description": "Use a cota do seu plano ChatGPT Plus / Pro / Team para chamar modelos Codex (gpt-5.5 e afins) — sem precisar de chave de API.",
         "signIn": "Entrar com ChatGPT",
         "inProgress": "Navegador aberto. Conclua a autorização e voltamos automaticamente…",
         "loggedInBadge": "Conectado com ChatGPT",
@@ -213,6 +321,7 @@
       "addCustom": "Adicionar personalizado",
       "empty": "Nenhum provedor configurado ainda. Adicione um para começar a gerar.",
       "active": "Ativo",
+      "noModel": "Nenhum modelo selecionado",
       "decryptionFailed": "Falha na descriptografia",
       "setActive": "Definir como ativo",
       "reEnterKey": "Redigitar chave",
@@ -332,6 +441,7 @@
       "reasoning": {
         "label": "Profundidade de raciocínio",
         "default": "Padrão (automático)",
+        "off": "Desligado",
         "minimal": "Mínima",
         "low": "Baixa",
         "medium": "Média",
@@ -362,7 +472,8 @@
       "languageLoadFailed": "Falha ao carregar o idioma",
       "langEn": "English",
       "langZhCN": "中文 (简体)",
-      "langPtBR": "Português (BR)"
+      "langPtBR": "Português (BR)",
+      "langEs": "Español"
     },
     "language": {
       "label": "Idioma",
@@ -381,6 +492,7 @@
       "data": "Diretório de dados",
       "change": "Alterar",
       "restartHint": "Escolha onde o open-codesign guarda configuração, logs e dados locais de design. As alterações são salvas permanentemente e se aplicam depois de reiniciar o app.",
+      "workspaceHint": "Pastas de workspace são gerenciadas por design no painel Arquivos. Alterar estes caminhos de armazenamento não move nem revincula arquivos de workspace existentes.",
       "locationSavedToast": "Local de armazenamento salvo. Reinicie o app para aplicar.",
       "locationSaveFailed": "Não foi possível salvar o local de armazenamento",
       "onboardingTitle": "Onboarding",
@@ -391,9 +503,12 @@
       "pathsLoadFailed": "Falha ao carregar os caminhos do app",
       "openFolderFailed": "Não foi possível abrir a pasta",
       "onboardingResetToast": "Onboarding redefinido. Reinicie o app para refazer a configuração.",
+      "templatesTitle": "Arquivos de modelo",
+      "templatesHint": "Abra a pasta integrada de starters e templates usada por scaffolds e recursos de design.",
       "diagnosticsTitle": "Diagnóstico",
       "diagnosticsHint": "Abra a pasta de logs para inspecionar os arquivos ou exporte um pacote com dados sensíveis removidos para reportar bugs.",
       "openLogFolder": "Abrir pasta de logs",
+      "openTemplatesFolder": "Abrir pasta de modelos",
       "exportDiagnostics": "Exportar diagnóstico",
       "diagnosticsExported": "Exportado para {{path}}",
       "diagnosticsExportFailed": "Não foi possível exportar o diagnóstico"
@@ -578,7 +693,7 @@
       },
       "pptx": {
         "label": "PPTX",
-        "hint": "Slides editáveis; um por <section>"
+        "hint": "Slides de alta fidelidade; um por <section>"
       },
       "zip": {
         "label": "Pacote ZIP",
@@ -728,6 +843,7 @@
     "exporterNotReady": "O exportador ainda está carregando. Tente novamente em um instante.",
     "rendererDisconnected": "O renderer não está conectado ao processo principal.",
     "onboardingIncomplete": "O onboarding não foi concluído.",
+    "designSystemRequiresOnboarding": "Conclua o onboarding antes de vincular um design system.",
     "providerMissingKey": "O provedor ativo \"{{provider}}\" não tem chave de API. Abra Configurações para adicionar uma.",
     "modelListFailed": "Não foi possível carregar a lista de modelos.",
     "unknown": "Erro desconhecido",
@@ -741,6 +857,7 @@
       "currentLabel": "Design atual",
       "menuLabel": "Trocar design",
       "newDesign": "Novo design",
+      "newConversationForWorkspace": "Nova conversa para este workspace",
       "renameCurrent": "Renomear",
       "viewAll": "Ver todos os designs…",
       "recent": "Recentes",
@@ -790,6 +907,7 @@
       "switchFailed": "Não foi possível trocar de design",
       "switchBlockedGenerating": "Aguarde a geração terminar antes de trocar",
       "busyGenerating": "Aguarde a geração atual terminar e tente novamente",
+      "workspaceBusyGenerating": "Já existe uma geração em andamento para este workspace",
       "renameFailed": "Não foi possível renomear o design",
       "duplicated": "Duplicado como \"{{name}}\"",
       "duplicateFailed": "Não foi possível duplicar o design",
@@ -816,6 +934,21 @@
       "timedOut": "Tempo da requisição esgotado — verifique firewall ou VPN.",
       "corsError": "Erro de CORS (não deveria acontecer no processo principal). Isso é um bug.",
       "sslError": "Erro de SSL / certificado (certificado autoassinado no relay?).",
+      "endpointNotFound": "A URL base já contém um caminho de versão, mas o provedor não expôs esta rota.",
+      "gatewayIncompatible": "O gateway aceitou a conexão, mas não implementa a API deste provedor. Tente trocar o wire, por exemplo para openai-chat.",
+      "gatewayWafBlocked": "O gateway ou proxy reverso bloqueou a geração antes de ela chegar ao modelo. Test Connection ainda pode passar porque só verifica o endpoint /models.",
+      "openaiResponsesMisconfigured": "O endpoint rejeitou o formato da requisição. O wire pode estar errado; tente openai-chat.",
+      "unsupportedRole": "O endpoint rejeitou o formato de role enviado ao modelo. Normalmente é incompatibilidade de wire ou política do modelo.",
+      "reasoningPolicy": "O endpoint rejeitou metadados de reasoning para este modelo. Reduza a profundidade de reasoning e tente novamente.",
+      "modelIdShape": "O id do modelo selecionado inclui um prefixo de provedor que este endpoint não aceita.",
+      "generationTimeout": "A geração atingiu o tempo limite configurado antes de o modelo terminar.",
+      "relayStreamingBug": "O gateway pode tratar incorretamente eventos SSE da OpenAI Responses API e cortar o stream cedo.",
+      "transportInterrupted": "A conexão com o provedor terminou antes da conclusão. Normalmente é timeout do gateway ou interrupção de rede.",
+      "referenceUrlInvalid": "A URL de referência é inválida ou não é suportada.",
+      "referenceUrlFetchFailed": "Não foi possível buscar a URL de referência.",
+      "referenceUrlTimeout": "A busca da URL de referência excedeu o tempo limite.",
+      "referenceUrlTooLarge": "O conteúdo da URL de referência é grande demais para incluir.",
+      "serverError": "Erro do servidor upstream. Pode ser temporário; tente novamente.",
       "unknown": "Erro desconhecido — veja o log completo para detalhes."
     },
     "fix": {
@@ -824,10 +957,18 @@
       "addCreditsGeneric": "Veja a página de faturamento do seu provedor",
       "addV1": "Adicionar /v1",
       "waitAndRetry": "Aguardar e tentar novamente",
+      "adjustGenerationTimeout": "Ajustar tempo limite da geração",
       "checkNetwork": "Verificar rede / VPN",
       "checkVpn": "Verificar VPN / firewall",
       "reportBug": "Reportar este bug",
-      "disableTls": "Desativar verificação TLS"
+      "disableTls": "Desativar verificação TLS",
+      "switchWire": "Trocar wire nas Configurações",
+      "setReasoningMinimal": "Definir reasoning como minimal",
+      "disableReasoning": "Desativar reasoning",
+      "normalizeModelId": "Remover prefixo do modelo",
+      "checkReferenceUrl": "Verificar URL de referência",
+      "gatewayWafBlocked": "Verificar allowlist / headers do proxy",
+      "relayStreamingBug": "Atualize o relay, troque o wire para openai-chat ou use api.openai.com diretamente"
     },
     "applyFix": "Aplicar esta correção",
     "setBaseUrlFirst": "Defina uma URL base primeiro",
@@ -977,8 +1118,10 @@
     "backToHub": "Todos os designs",
     "tabs": {
       "recent": "Recentes",
+      "all": "Todos",
       "your": "Seus designs",
       "examples": "Exemplos",
+      "resources": "Recursos",
       "designSystems": "Design systems"
     },
     "recent": {
@@ -1061,6 +1204,7 @@
     "PROVIDER_ERROR": "O provedor retornou um erro. Verifique sua chave de API e tente novamente.",
     "PROVIDER_HTTP_4XX": "O provedor rejeitou a requisição. Verifique sua chave de API e o faturamento.",
     "PROVIDER_UPSTREAM_ERROR": "O provedor retornou um erro inesperado. Detalhes estão no log.",
+    "PROVIDER_GATEWAY_INCOMPATIBLE": "Sua porta de entrada retornou 'não implementado' para a API de Mensagens. Tente mudar o protocolo para openai-chat nas Configurações, ou use uma porta de entrada que suporte a API de Mensagens da Anthropic.",
     "PROVIDER_ABORTED": "Geração cancelada.",
     "PROVIDER_RETRY_EXHAUSTED": "O provedor falhou após várias tentativas. Verifique sua conexão e tente novamente.",
     "CLAUDE_CODE_OAUTH_ONLY": "Seu login no Claude Code usa uma assinatura Anthropic (Pro/Max). Apps de terceiros não podem reutilizar a cota da assinatura — gere uma chave de API em console.anthropic.com e use aqui.",
@@ -1069,6 +1213,10 @@
     "INPUT_EMPTY_HTML": "Um HTML existente é obrigatório para esta operação.",
     "INPUT_UNSUPPORTED_MODE": "Este modo de geração não é suportado.",
     "GENERATION_TIMEOUT": "A geração excedeu o tempo limite. Tente um prompt mais curto ou aumente o tempo em Configurações.",
+    "GENERATION_INCOMPLETE": "O agente parou antes de concluir a verificação. Continue a execução para finalizar o artefato do espaço de trabalho.",
+    "WORKSPACE_MISSING": "Este design não tem um espaço de trabalho vinculado. Reabra ou recrie o design.",
+    "ARTIFACT_PROTOCOL_INVALID": "O artefato gerado não seguiu o protocolo obrigatório.",
+    "TOOL_EXECUTION_FAILED": "Uma ferramenta de design falhou durante a execução. Detalhes estão no log.",
     "CONFIG_READ_FAILED": "Falha ao ler o arquivo de configuração. Verifique as permissões.",
     "CONFIG_PARSE_FAILED": "O arquivo de configuração não pôde ser lido. Pode estar corrompido.",
     "CONFIG_SCHEMA_INVALID": "O arquivo de configuração tem um formato não reconhecido. Reconfigure.",

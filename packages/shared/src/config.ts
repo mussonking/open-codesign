@@ -50,38 +50,44 @@ export const CHATGPT_CODEX_PROVIDER_ID = 'chatgpt-codex';
 
 // ── Secrets & StoredDesignSystem ─────────────────────────────────────────────
 
-export const SecretRef = z.object({
-  ciphertext: z.string().min(1),
-  /**
-   * Display-only mask like "sk-ant-***xyz9". Persisted at save time so the
-   * Settings page can render the row without calling `safeStorage.decryptString`
-   * (which on unsigned macOS builds triggers a keychain password prompt).
-   * Optional for backwards compat: older configs without a mask will be
-   * migrated on first read by decrypting once and writing the mask back.
-   */
-  mask: z.string().optional(),
-});
+export const SecretRef = z
+  .object({
+    ciphertext: z.string().min(1),
+    /**
+     * Display-only mask like "sk-ant-***xyz9". Persisted at save time so the
+     * Settings page can render the row without calling `safeStorage.decryptString`
+     * (which on unsigned macOS builds triggers a keychain password prompt).
+     * Optional for backwards compat: older configs without a mask will be
+     * migrated on first read by decrypting once and writing the mask back.
+     */
+    mask: z.string().optional(),
+  })
+  .strict();
 export type SecretRef = z.infer<typeof SecretRef>;
 
-export const BaseUrlRef = z.object({
-  baseUrl: z.string().url(),
-});
+export const BaseUrlRef = z
+  .object({
+    baseUrl: z.string().url(),
+  })
+  .strict();
 export type BaseUrlRef = z.infer<typeof BaseUrlRef>;
 
 export const STORED_DESIGN_SYSTEM_SCHEMA_VERSION = 1 as const;
 
-const StoredDesignSystemShape = z.object({
-  schemaVersion: z.literal(STORED_DESIGN_SYSTEM_SCHEMA_VERSION),
-  rootPath: z.string().min(1),
-  summary: z.string().min(1),
-  extractedAt: z.string().min(1),
-  sourceFiles: z.array(z.string().min(1)).max(24).default([]),
-  colors: z.array(z.string().min(1)).max(24).default([]),
-  fonts: z.array(z.string().min(1)).max(16).default([]),
-  spacing: z.array(z.string().min(1)).max(16).default([]),
-  radius: z.array(z.string().min(1)).max(16).default([]),
-  shadows: z.array(z.string().min(1)).max(16).default([]),
-});
+const StoredDesignSystemShape = z
+  .object({
+    schemaVersion: z.literal(STORED_DESIGN_SYSTEM_SCHEMA_VERSION),
+    rootPath: z.string().min(1),
+    summary: z.string().min(1),
+    extractedAt: z.string().min(1),
+    sourceFiles: z.array(z.string().min(1)).max(24).default([]),
+    colors: z.array(z.string().min(1)).max(24).default([]),
+    fonts: z.array(z.string().min(1)).max(16).default([]),
+    spacing: z.array(z.string().min(1)).max(16).default([]),
+    radius: z.array(z.string().min(1)).max(16).default([]),
+    shadows: z.array(z.string().min(1)).max(16).default([]),
+  })
+  .strict();
 
 export const StoredDesignSystem = z.preprocess((raw) => {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return raw;
@@ -93,29 +99,30 @@ export type StoredDesignSystem = z.infer<typeof StoredDesignSystem>;
 
 // ── ProviderEntry (v3) ───────────────────────────────────────────────────────
 
-export const ReasoningLevelSchema = z.enum(['minimal', 'low', 'medium', 'high', 'xhigh']);
+export const ReasoningLevelSchema = z.enum(['off', 'minimal', 'low', 'medium', 'high', 'xhigh']);
 export type ReasoningLevel = z.infer<typeof ReasoningLevelSchema>;
 
 export const ProviderModelDiscoveryModeSchema = z.enum(['models', 'static-hint', 'manual']);
 export type ProviderModelDiscoveryMode = z.infer<typeof ProviderModelDiscoveryModeSchema>;
 
-export const ProviderCapabilitiesSchema = z.object({
-  supportsKeyless: z.boolean().optional(),
-  supportsModelsEndpoint: z.boolean().optional(),
-  supportsChatCompletions: z.boolean().optional(),
-  supportsResponsesApi: z.boolean().optional(),
-  supportsSystemRole: z.boolean().optional(),
-  supportsDeveloperRole: z.boolean().optional(),
-  supportsReasoning: z.boolean().optional(),
-  supportsToolCalling: z.boolean().optional(),
-  requiresClaudeCodeIdentity: z.boolean().optional(),
-  modelDiscoveryMode: ProviderModelDiscoveryModeSchema.optional(),
-});
+export const ProviderCapabilitiesSchema = z
+  .object({
+    supportsKeyless: z.boolean().optional(),
+    supportsModelsEndpoint: z.boolean().optional(),
+    supportsReasoning: z.boolean().optional(),
+    requiresClaudeCodeIdentity: z.boolean().optional(),
+    modelDiscoveryMode: ProviderModelDiscoveryModeSchema.optional(),
+  })
+  .strict();
 export type ProviderCapabilities = z.infer<typeof ProviderCapabilitiesSchema>;
 
 export const IMAGE_GENERATION_SCHEMA_VERSION = 1 as const;
 
-export const ImageGenerationProviderSchema = z.enum(['openai', 'openrouter']);
+export const ImageGenerationProviderSchema = z.enum([
+  'openai',
+  'openrouter',
+  CHATGPT_CODEX_PROVIDER_ID,
+]);
 export type ImageGenerationProvider = z.infer<typeof ImageGenerationProviderSchema>;
 
 export const ImageGenerationCredentialModeSchema = z.enum(['inherit', 'custom']);
@@ -130,68 +137,59 @@ export type ImageGenerationSize = z.infer<typeof ImageGenerationSizeSchema>;
 export const ImageGenerationOutputFormatSchema = z.enum(['png', 'jpeg', 'webp']);
 export type ImageGenerationOutputFormat = z.infer<typeof ImageGenerationOutputFormatSchema>;
 
-export const ImageGenerationSettingsSchema = z.object({
-  schemaVersion: z.literal(IMAGE_GENERATION_SCHEMA_VERSION),
-  enabled: z.boolean().default(false),
-  provider: ImageGenerationProviderSchema.default('openai'),
-  credentialMode: ImageGenerationCredentialModeSchema.default('inherit'),
-  model: z.string().min(1).default('gpt-image-2'),
-  baseUrl: z.string().url().optional(),
-  apiKey: SecretRef.optional(),
-  quality: ImageGenerationQualitySchema.default('high'),
-  size: ImageGenerationSizeSchema.default('1536x1024'),
-  outputFormat: ImageGenerationOutputFormatSchema.default('png'),
-});
+export const ImageGenerationSettingsSchema = z
+  .object({
+    schemaVersion: z.literal(IMAGE_GENERATION_SCHEMA_VERSION),
+    enabled: z.boolean().default(false),
+    provider: ImageGenerationProviderSchema.default('openai'),
+    credentialMode: ImageGenerationCredentialModeSchema.default('inherit'),
+    model: z.string().min(1).default('gpt-image-2'),
+    baseUrl: z.string().url().optional(),
+    apiKey: SecretRef.optional(),
+    quality: ImageGenerationQualitySchema.default('high'),
+    size: ImageGenerationSizeSchema.default('1536x1024'),
+    outputFormat: ImageGenerationOutputFormatSchema.default('png'),
+  })
+  .strict();
 export type ImageGenerationSettings = z.infer<typeof ImageGenerationSettingsSchema>;
 
-export const ProviderEntrySchema = z.object({
-  id: z.string().min(1),
-  name: z.string().min(1),
-  builtin: z.boolean(),
-  wire: WireApiSchema,
-  baseUrl: z.string().url(),
-  envKey: z.string().min(1).optional(),
-  defaultModel: z.string().min(1),
-  modelsHint: z.array(z.string()).optional(),
-  httpHeaders: z.record(z.string(), z.string()).optional(),
-  queryParams: z.record(z.string(), z.string()).optional(),
-  /**
-   * Imported providers can explicitly require a stored secret. Codex uses this
-   * for providers with `requires_openai_auth = true`; providers without it may
-   * still be keyless proxy endpoints.
-   */
-  requiresApiKey: z.boolean().optional(),
-  /**
-   * Per-provider reasoning effort override. When set, overrides the
-   * model-family default from `reasoningForModel` in core. Useful for
-   * proxies that gate reasoning tiers by plan (Claude Code consumer-tier
-   * accepts only 'medium') or for users who want to dial depth up/down
-   * per endpoint. The UI surfaces this as a "Reasoning depth" dropdown.
-   */
-  reasoningLevel: ReasoningLevelSchema.optional(),
-  capabilities: ProviderCapabilitiesSchema.optional(),
-});
+export const ProviderEntrySchema = z
+  .object({
+    id: z.string().min(1),
+    name: z.string().min(1),
+    builtin: z.boolean(),
+    wire: WireApiSchema,
+    baseUrl: z.string().url(),
+    envKey: z.string().min(1).optional(),
+    defaultModel: z.string().min(1),
+    modelsHint: z.array(z.string()).optional(),
+    httpHeaders: z.record(z.string(), z.string()).optional(),
+    queryParams: z.record(z.string(), z.string()).optional(),
+    /**
+     * Imported providers can explicitly require a stored secret. Codex uses this
+     * for providers with `requires_openai_auth = true`; keyless endpoints must
+     * explicitly set `requiresApiKey: false` or `capabilities.supportsKeyless`.
+     */
+    requiresApiKey: z.boolean().optional(),
+    /**
+     * Per-provider reasoning effort override. When set, overrides the
+     * model-family default from `reasoningForModel` in core. Useful for
+     * proxies that gate reasoning tiers by plan (Claude Code consumer-tier
+     * accepts only 'medium') or for users who want to dial depth up/down
+     * per endpoint. The UI surfaces this as a "Reasoning depth" dropdown.
+     */
+    reasoningLevel: ReasoningLevelSchema.optional(),
+    capabilities: ProviderCapabilitiesSchema.optional(),
+  })
+  .strict();
 export type ProviderEntry = z.infer<typeof ProviderEntrySchema>;
 
 interface ProviderCapabilityInput {
   wire: WireApi;
-  baseUrl?: string | undefined;
   requiresApiKey?: boolean | undefined;
   modelsHint?: string[] | undefined;
   reasoningLevel?: ReasoningLevel | undefined;
   capabilities?: ProviderCapabilities | undefined;
-}
-
-function isAnthropicOfficialHost(baseUrl: string | undefined): boolean {
-  if (baseUrl === undefined || baseUrl.length === 0) return true;
-  let host: string;
-  try {
-    host = new URL(baseUrl).host.toLowerCase();
-  } catch {
-    return false;
-  }
-  const normalized = host.replace(/:(?:80|443)$/, '');
-  return normalized === 'api.anthropic.com' || normalized.endsWith('.anthropic.com');
 }
 
 export function defaultProviderCapabilities(
@@ -199,23 +197,16 @@ export function defaultProviderCapabilities(
   entry: ProviderCapabilityInput,
 ): Required<ProviderCapabilities> {
   const supportsModelsEndpoint =
-    entry.capabilities?.supportsModelsEndpoint ?? entry.wire !== 'openai-codex-responses';
-  const wire = entry.wire;
+    entry.wire !== 'openai-codex-responses' && entry.modelsHint === undefined;
   return {
     supportsKeyless: entry.requiresApiKey === false,
     supportsModelsEndpoint,
-    supportsChatCompletions: wire === 'openai-chat',
-    supportsResponsesApi: wire === 'openai-responses' || wire === 'openai-codex-responses',
-    supportsSystemRole: wire !== 'openai-responses' && wire !== 'openai-codex-responses',
-    supportsDeveloperRole: wire === 'openai-responses' || wire === 'openai-codex-responses',
     supportsReasoning:
-      entry.reasoningLevel !== undefined ||
-      wire === 'anthropic' ||
-      wire === 'openai-responses' ||
-      wire === 'openai-codex-responses',
-    supportsToolCalling:
-      wire === 'anthropic' || wire === 'openai-chat' || wire === 'openai-responses',
-    requiresClaudeCodeIdentity: wire === 'anthropic' && !isAnthropicOfficialHost(entry.baseUrl),
+      (entry.reasoningLevel !== undefined && entry.reasoningLevel !== 'off') ||
+      entry.wire === 'anthropic' ||
+      entry.wire === 'openai-responses' ||
+      entry.wire === 'openai-codex-responses',
+    requiresClaudeCodeIdentity: false,
     modelDiscoveryMode:
       entry.modelsHint !== undefined ? 'static-hint' : supportsModelsEndpoint ? 'models' : 'manual',
   };
@@ -225,25 +216,11 @@ export function resolveProviderCapabilities(
   providerId: string,
   entry: ProviderCapabilityInput,
 ): Required<ProviderCapabilities> {
-  const defaults = defaultProviderCapabilities(providerId, entry);
-  const explicit = entry.capabilities ?? {};
   return {
-    supportsKeyless: explicit.supportsKeyless ?? defaults.supportsKeyless,
-    supportsModelsEndpoint: explicit.supportsModelsEndpoint ?? defaults.supportsModelsEndpoint,
-    supportsChatCompletions: explicit.supportsChatCompletions ?? defaults.supportsChatCompletions,
-    supportsResponsesApi: explicit.supportsResponsesApi ?? defaults.supportsResponsesApi,
-    supportsSystemRole: explicit.supportsSystemRole ?? defaults.supportsSystemRole,
-    supportsDeveloperRole: explicit.supportsDeveloperRole ?? defaults.supportsDeveloperRole,
-    supportsReasoning: explicit.supportsReasoning ?? defaults.supportsReasoning,
-    supportsToolCalling: explicit.supportsToolCalling ?? defaults.supportsToolCalling,
-    requiresClaudeCodeIdentity:
-      explicit.requiresClaudeCodeIdentity ?? defaults.requiresClaudeCodeIdentity,
-    modelDiscoveryMode: explicit.modelDiscoveryMode ?? defaults.modelDiscoveryMode,
+    ...defaultProviderCapabilities(providerId, entry),
+    ...(entry.capabilities ?? {}),
   };
 }
-
-/** Alias for `Required<ProviderCapabilities>` — all capability fields resolved. */
-export type ResolvedProviderCapabilities = Required<ProviderCapabilities>;
 
 export const BUILTIN_PROVIDERS: Readonly<Record<SupportedOnboardingProvider, ProviderEntry>> = {
   anthropic: {
@@ -256,12 +233,7 @@ export const BUILTIN_PROVIDERS: Readonly<Record<SupportedOnboardingProvider, Pro
     capabilities: {
       supportsKeyless: false,
       supportsModelsEndpoint: true,
-      supportsChatCompletions: false,
-      supportsResponsesApi: false,
-      supportsSystemRole: true,
-      supportsDeveloperRole: false,
       supportsReasoning: true,
-      supportsToolCalling: true,
       requiresClaudeCodeIdentity: false,
       modelDiscoveryMode: 'models',
     },
@@ -276,12 +248,7 @@ export const BUILTIN_PROVIDERS: Readonly<Record<SupportedOnboardingProvider, Pro
     capabilities: {
       supportsKeyless: false,
       supportsModelsEndpoint: true,
-      supportsChatCompletions: true,
-      supportsResponsesApi: false,
-      supportsSystemRole: true,
-      supportsDeveloperRole: false,
       supportsReasoning: false,
-      supportsToolCalling: true,
       requiresClaudeCodeIdentity: false,
       modelDiscoveryMode: 'models',
     },
@@ -296,12 +263,7 @@ export const BUILTIN_PROVIDERS: Readonly<Record<SupportedOnboardingProvider, Pro
     capabilities: {
       supportsKeyless: false,
       supportsModelsEndpoint: true,
-      supportsChatCompletions: true,
-      supportsResponsesApi: false,
-      supportsSystemRole: true,
-      supportsDeveloperRole: false,
       supportsReasoning: false,
-      supportsToolCalling: true,
       requiresClaudeCodeIdentity: false,
       modelDiscoveryMode: 'models',
     },
@@ -317,12 +279,7 @@ export const BUILTIN_PROVIDERS: Readonly<Record<SupportedOnboardingProvider, Pro
     capabilities: {
       supportsKeyless: true,
       supportsModelsEndpoint: true,
-      supportsChatCompletions: true,
-      supportsResponsesApi: false,
-      supportsSystemRole: true,
-      supportsDeveloperRole: false,
       supportsReasoning: false,
-      supportsToolCalling: true,
       requiresClaudeCodeIdentity: false,
       modelDiscoveryMode: 'models',
     },
@@ -341,22 +298,49 @@ export const BUILTIN_PROVIDERS: Readonly<Record<SupportedOnboardingProvider, Pro
  * consumers keep working without rewrites. These derived fields are NOT
  * persisted. Writers must use v3 fields only.
  */
-export const ConfigV3Schema = z.object({
-  version: z.literal(3),
-  // `activeProvider` / `activeModel` are ALLOWED to be empty: that's the
-  // legal "no active provider" state the app lands in once the last
-  // provider is deleted. Consumers (`toState`, `resolveActiveCredentials`,
-  // Settings UI) already branch on hasKey/undefined-entry for this case.
-  // The previous `.min(1)` invariant made the empty state unrepresentable
-  // on disk — writing it succeeded but the next boot rejected the file,
-  // hanging the main process before the window could open.
-  activeProvider: z.string(),
-  activeModel: z.string(),
-  secrets: z.record(z.string(), SecretRef).default({}),
-  providers: z.record(z.string(), ProviderEntrySchema).default({}),
-  designSystem: StoredDesignSystem.optional(),
-  imageGeneration: ImageGenerationSettingsSchema.optional(),
-});
+export const ConfigV3Schema = z
+  .object({
+    version: z.literal(3),
+    // `activeProvider` / `activeModel` are ALLOWED to be empty: that's the
+    // legal "no active provider" state the app lands in once the last
+    // provider is deleted. Consumers (`toState`, `resolveActiveCredentials`,
+    // Settings UI) already branch on hasKey/undefined-entry for this case.
+    // The previous `.min(1)` invariant made the empty state unrepresentable
+    // on disk — writing it succeeded but the next boot rejected the file,
+    // hanging the main process before the window could open.
+    activeProvider: z.string(),
+    activeModel: z.string(),
+    secrets: z.record(z.string(), SecretRef).default({}),
+    providers: z.record(z.string(), ProviderEntrySchema).default({}),
+    designSystem: StoredDesignSystem.optional(),
+    imageGeneration: ImageGenerationSettingsSchema.optional(),
+  })
+  .strict()
+  .superRefine((config, ctx) => {
+    const hasActiveProvider = config.activeProvider.length > 0;
+    const hasActiveModel = config.activeModel.length > 0;
+    if (!hasActiveProvider && hasActiveModel) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['activeModel'],
+        message: 'activeModel must be empty when activeProvider is empty',
+      });
+    }
+    if (hasActiveProvider && !hasActiveModel) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['activeModel'],
+        message: 'activeModel must be non-empty when activeProvider is set',
+      });
+    }
+    if (hasActiveProvider && config.providers[config.activeProvider] === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['activeProvider'],
+        message: `activeProvider "${config.activeProvider}" has no provider entry`,
+      });
+    }
+  });
 export type ConfigV3 = z.infer<typeof ConfigV3Schema>;
 
 /**
@@ -379,8 +363,8 @@ const LegacyConfigSchema = z.object({
   provider: ProviderIdEnum,
   modelPrimary: z.string(),
   modelFast: z.string().optional(),
-  secrets: z.record(ProviderIdEnum, SecretRef).default({}),
-  baseUrls: z.record(ProviderIdEnum, BaseUrlRef).default({}),
+  secrets: z.partialRecord(ProviderIdEnum, SecretRef).default({}),
+  baseUrls: z.partialRecord(ProviderIdEnum, BaseUrlRef).default({}),
   designSystem: StoredDesignSystem.optional(),
 });
 type LegacyConfig = z.infer<typeof LegacyConfigSchema>;
@@ -439,7 +423,7 @@ function parseV3OrMigrate(raw: unknown): ConfigV3 {
     return ConfigV3Schema.parse(raw);
   }
   const legacy = LegacyConfigSchema.parse(raw);
-  return migrateLegacyToV3(legacy);
+  return ConfigV3Schema.parse(migrateLegacyToV3(legacy));
 }
 
 /**
@@ -533,7 +517,14 @@ export function isSupportedOnboardingProvider(p: string): p is SupportedOnboardi
 export function detectWireFromBaseUrl(baseUrl: string): WireApi {
   const lower = baseUrl.toLowerCase();
   if (lower.includes('anthropic')) return 'anthropic';
-  if (lower.includes('openai.azure.com') || lower.includes('/responses')) {
+  let host = '';
+  try {
+    host = new URL(baseUrl).hostname.toLowerCase();
+  } catch {
+    host = '';
+  }
+  const isAzureOpenAiHost = host === 'openai.azure.com' || host.endsWith('.openai.azure.com');
+  if (isAzureOpenAiHost || lower.includes('/responses')) {
     return 'openai-responses';
   }
   return 'openai-chat';

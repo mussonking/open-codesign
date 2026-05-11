@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
-import { AddCustomProviderModal } from './AddCustomProviderModal';
+import { AddCustomProviderModal, buildEndpointDiscoveryPayload } from './AddCustomProviderModal';
 
 vi.mock('@open-codesign/i18n', () => ({
   useT: () => (key: string) => key,
@@ -14,6 +14,7 @@ describe('AddCustomProviderModal', () => {
 
     expect(html).toContain('settings.providers.custom.compatibilityHintTitle');
     expect(html).toContain('settings.providers.custom.compatibilityHintBody');
+    expect(html).toContain('settings.providers.custom.allowPrivateNetwork');
   });
 
   it('hides the compatibility warning when editing a locked builtin endpoint', () => {
@@ -35,5 +36,14 @@ describe('AddCustomProviderModal', () => {
 
     expect(html).not.toContain('settings.providers.custom.compatibilityHintTitle');
     expect(html).not.toContain('settings.providers.custom.compatibilityHintBody');
+  });
+
+  it('builds endpoint discovery payloads from the latest private-network opt-in value', () => {
+    expect(buildEndpointDiscoveryPayload('openai-chat', ' http://127.0.0.1:8317 ', true)).toEqual({
+      wire: 'openai-chat',
+      baseUrl: 'http://127.0.0.1:8317',
+      apiKey: '',
+      allowPrivateNetwork: true,
+    });
   });
 });

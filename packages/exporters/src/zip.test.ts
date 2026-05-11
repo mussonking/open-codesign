@@ -1,4 +1,12 @@
-import { existsSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -8,6 +16,8 @@ let tempDir = '';
 
 beforeAll(() => {
   tempDir = realpathSync(mkdtempSync(join(tmpdir(), 'codesign-zip-test-')));
+  mkdirSync(join(tempDir, 'assets'), { recursive: true });
+  writeFileSync(join(tempDir, 'assets', 'logo.svg'), '<svg></svg>');
 });
 
 afterAll(() => {
@@ -48,6 +58,82 @@ describe('exportZip', () => {
     const dest = join(tempDir, 'minimal.zip');
     const result = await exportZip('<p>x</p>', dest);
     expect(result.bytes).toBeGreaterThan(50);
+  });
+
+  it('writes JSX source as browser-openable index.html', async () => {
+    const dest = join(tempDir, 'jsx-bundle.zip');
+    await exportZip(
+      'function App() { return <main id="zip-jsx">ZIP</main>; }\nReactDOM.createRoot(document.getElementById("root")).render(<App/>);',
+      dest,
+    );
+
+    const { Unzip } = await import('zip-lib');
+    const extractDir = join(tempDir, 'jsx-extracted');
+    const unzip = new Unzip();
+    await unzip.extract(dest, extractDir);
+
+    const out = readFileSync(join(extractDir, 'index.html'), 'utf8');
+    expect(out).toContain('CODESIGN_STANDALONE_RUNTIME');
+    expect(out).toContain('zip-jsx');
+    expect(out).not.toContain('https://cdn.tailwindcss.com');
+  });
+
+  it('bundles the original source and export manifest for handoff quality', async () => {
+    const dest = join(tempDir, 'source-manifest.zip');
+    await exportZip(
+      'function App() { return <main id="zip-source">ZIP</main>; }\nReactDOM.createRoot(document.getElementById("root")).render(<App/>);',
+      dest,
+      { sourcePath: 'screens/App.tsx', readmeTitle: 'Source manifest' },
+    );
+
+    const { Unzip } = await import('zip-lib');
+    const extractDir = join(tempDir, 'source-manifest-extracted');
+    const unzip = new Unzip();
+    await unzip.extract(dest, extractDir);
+
+    expect(readFileSync(join(extractDir, 'source', 'screens', 'App.tsx'), 'utf8')).toContain(
+      'zip-source',
+    );
+    const manifest = JSON.parse(readFileSync(join(extractDir, 'manifest.json'), 'utf8')) as {
+      schemaVersion: number;
+      sourcePath: string;
+      files: string[];
+    };
+    expect(manifest.schemaVersion).toBe(1);
+    expect(manifest.sourcePath).toBe('screens/App.tsx');
+    expect(manifest.files).toContain('source/screens/App.tsx');
+  });
+
+  it('auto-collects local asset references and rewrites root-relative paths', async () => {
+    const dest = join(tempDir, 'auto-assets.zip');
+    await exportZip('<img src="/assets/logo.svg">', dest, {
+      assetBasePath: tempDir,
+      assetRootPath: tempDir,
+    });
+
+    const { Unzip } = await import('zip-lib');
+    const extractDir = join(tempDir, 'auto-extracted');
+    const unzip = new Unzip();
+    await unzip.extract(dest, extractDir);
+
+    expect(existsSync(join(extractDir, 'assets', 'logo.svg'))).toBe(true);
+    expect(readFileSync(join(extractDir, 'index.html'), 'utf8')).toContain('src="assets/logo.svg"');
+  });
+
+  it('bundles workspace DESIGN.md when present', async () => {
+    writeFileSync(join(tempDir, 'DESIGN.md'), '---\nversion: alpha\nname: Zip Test\n---\n', 'utf8');
+    const dest = join(tempDir, 'design-md.zip');
+    await exportZip('<p>x</p>', dest, {
+      assetBasePath: tempDir,
+      assetRootPath: tempDir,
+    });
+
+    const { Unzip } = await import('zip-lib');
+    const extractDir = join(tempDir, 'design-md-extracted');
+    const unzip = new Unzip();
+    await unzip.extract(dest, extractDir);
+
+    expect(readFileSync(join(extractDir, 'DESIGN.md'), 'utf8')).toContain('Zip Test');
   });
 
   it('throws EXPORTER_ZIP_FAILED when the destination cannot be written', async () => {

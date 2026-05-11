@@ -1,11 +1,11 @@
 /**
- * Per-message size-based context compaction for pi-agent-core's
- * `transformContext` hook. Runs before every LLM call.
+ * Safety-fuse context compaction for pi-agent-core's `transformContext` hook.
+ * Runs before every LLM call, but it is not the primary memory system.
  *
- * Philosophy: **history is intent tracking, not payload storage.** The model
- * needs the decision trail — which tools, in what order, with what shape —
- * not verbatim 9 MB artifact dumps or whole-file view returns from ten turns
- * ago. Current file state is always recoverable via ranged `view()`.
+ * Harness ownership:
+ * - workspace files are the source of truth for artifact state;
+ * - `buildDesignContextPack` chooses the compact history/brief sent to models;
+ * - this file is only a last-mile fuse for runaway assistant/tool payloads.
  *
  * Evolution:
  *   - v1 (window): kept last N turns verbatim, stubbed older. Missed the
@@ -51,6 +51,35 @@ const TOOL_RESULT_LIMIT = 8 * 1024;
 const HARD_CAP_BYTES = 200_000;
 const AGGRESSIVE_BLOCK_LIMIT = 2 * 1024;
 
+interface CompactionStats {
+  compactedBlocks: number;
+  compactedBytes: number;
+  reasons: Set<string>;
+}
+
+function createCompactionStats(): CompactionStats {
+  return { compactedBlocks: 0, compactedBytes: 0, reasons: new Set() };
+}
+
+function recordCompaction(
+  stats: CompactionStats,
+  reason: 'assistant_text' | 'tool_call_input' | 'tool_result_text',
+  beforeBytes: number,
+  afterBytes: number,
+): void {
+  stats.compactedBlocks += 1;
+  stats.compactedBytes += Math.max(0, beforeBytes - afterBytes);
+  stats.reasons.add(reason);
+}
+
+function statsForLog(stats: CompactionStats): Record<string, unknown> {
+  return {
+    compactedBlocks: stats.compactedBlocks,
+    compactedBytes: stats.compactedBytes,
+    reason: Array.from(stats.reasons).sort().join(','),
+  };
+}
+
 /**
  * Number of most-recent non-user messages whose tool payloads (toolCall.input
  * and toolResult.text) stay verbatim. Assistant TEXT is still capped inside
@@ -86,6 +115,7 @@ function compactAssistant(
   m: AgentMessage,
   textLimit: number,
   toolLimit: number | null,
+  stats: CompactionStats,
 ): AgentMessage {
   const original = m as unknown as {
     role: 'assistant';
@@ -99,7 +129,9 @@ function compactAssistant(
       const text = typeof block['text'] === 'string' ? (block['text'] as string) : '';
       if (text.length <= textLimit) return block;
       changed = true;
-      return { ...block, text: stubText(text, 'prior assistant output dropped') };
+      const nextText = stubText(text, 'prior assistant output dropped');
+      recordCompaction(stats, 'assistant_text', text.length, nextText.length);
+      return { ...block, text: nextText };
     }
     if (type === 'toolCall' && toolLimit !== null) {
       const input = block['input'];
@@ -114,9 +146,17 @@ function compactAssistant(
       }
       if (origBytes <= toolLimit) return block;
       changed = true;
+      const nextInput = { _summarized: true, _origBytes: origBytes, _preview: preview };
+      let nextBytes = 0;
+      try {
+        nextBytes = JSON.stringify(nextInput).length;
+      } catch {
+        /* ignore */
+      }
+      recordCompaction(stats, 'tool_call_input', origBytes, nextBytes);
       return {
         ...block,
-        input: { _summarized: true, _origBytes: origBytes, _preview: preview },
+        input: nextInput,
       };
     }
     return block;
@@ -125,7 +165,11 @@ function compactAssistant(
   return { ...(original as object), content: nextContent } as unknown as AgentMessage;
 }
 
-function compactToolResult(m: AgentMessage, limit: number | null): AgentMessage {
+function compactToolResult(
+  m: AgentMessage,
+  limit: number | null,
+  stats: CompactionStats,
+): AgentMessage {
   if (limit === null) return m;
   const original = m as unknown as {
     role: 'toolResult';
@@ -138,7 +182,9 @@ function compactToolResult(m: AgentMessage, limit: number | null): AgentMessage 
     const text = typeof block.text === 'string' ? block.text : '';
     if (text.length <= limit) return block;
     changed = true;
-    return { ...block, text: stubText(text, 'tool result dropped — use view() for current state') };
+    const nextText = stubText(text, 'tool result dropped — use view() for current state');
+    recordCompaction(stats, 'tool_result_text', text.length, nextText.length);
+    return { ...block, text: nextText };
   });
   if (!changed) return m;
   return { ...(original as object), content: nextContent } as unknown as AgentMessage;
@@ -172,7 +218,11 @@ interface CapConfig {
   windowTurns: number;
 }
 
-function applyCaps(messages: AgentMessage[], cfg: CapConfig): AgentMessage[] {
+function applyCaps(
+  messages: AgentMessage[],
+  cfg: CapConfig,
+  stats: CompactionStats,
+): AgentMessage[] {
   const windowStart = computeWindowStart(messages, cfg.windowTurns);
   return messages.map((m, idx) => {
     const isRecent = idx >= windowStart;
@@ -181,10 +231,15 @@ function applyCaps(messages: AgentMessage[], cfg: CapConfig): AgentMessage[] {
         m,
         cfg.textLimit,
         isRecent ? cfg.toolInputLimitRecent : cfg.toolInputLimitOld,
+        stats,
       );
     }
     if (m.role === 'toolResult') {
-      return compactToolResult(m, isRecent ? cfg.toolResultLimitRecent : cfg.toolResultLimitOld);
+      return compactToolResult(
+        m,
+        isRecent ? cfg.toolResultLimitRecent : cfg.toolResultLimitOld,
+        stats,
+      );
     }
     return m;
   });
@@ -192,48 +247,65 @@ function applyCaps(messages: AgentMessage[], cfg: CapConfig): AgentMessage[] {
 
 export function buildTransformContext(
   log: CoreLogger = NOOP_LOGGER,
+  onAggressivePrune?: () => void,
 ): (messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]> {
   return async (messages) => {
     if (messages.length === 0) return messages;
 
     const before = estimateBytes(messages);
-    const first = applyCaps(messages, {
-      textLimit: TEXT_BLOCK_LIMIT,
-      toolInputLimitOld: TOOL_INPUT_LIMIT,
-      toolResultLimitOld: TOOL_RESULT_LIMIT,
-      toolInputLimitRecent: null,
-      toolResultLimitRecent: null,
-      windowTurns: RECENT_WINDOW,
-    });
+    const firstStats = createCompactionStats();
+    const first = applyCaps(
+      messages,
+      {
+        textLimit: TEXT_BLOCK_LIMIT,
+        toolInputLimitOld: TOOL_INPUT_LIMIT,
+        toolResultLimitOld: TOOL_RESULT_LIMIT,
+        toolInputLimitRecent: null,
+        toolResultLimitRecent: null,
+        windowTurns: RECENT_WINDOW,
+      },
+      firstStats,
+    );
     const firstSize = estimateBytes(first);
 
-    log.info('[context-prune] step=caps', {
-      messages: messages.length,
-      before,
-      after: firstSize,
-      textLimit: TEXT_BLOCK_LIMIT,
-      toolInputLimit: TOOL_INPUT_LIMIT,
-      toolResultLimit: TOOL_RESULT_LIMIT,
-      window: RECENT_WINDOW,
-    });
+    if (firstSize < before) {
+      log.info('[context-prune] step=caps', {
+        messages: messages.length,
+        before,
+        after: firstSize,
+        textLimit: TEXT_BLOCK_LIMIT,
+        toolInputLimit: TOOL_INPUT_LIMIT,
+        toolResultLimit: TOOL_RESULT_LIMIT,
+        window: RECENT_WINDOW,
+        ...statsForLog(firstStats),
+      });
+    }
 
     if (firstSize <= HARD_CAP_BYTES) return first;
 
-    const aggressive = applyCaps(messages, {
-      textLimit: AGGRESSIVE_BLOCK_LIMIT,
-      toolInputLimitOld: AGGRESSIVE_BLOCK_LIMIT,
-      toolResultLimitOld: AGGRESSIVE_BLOCK_LIMIT,
-      toolInputLimitRecent: AGGRESSIVE_BLOCK_LIMIT,
-      toolResultLimitRecent: AGGRESSIVE_BLOCK_LIMIT,
-      windowTurns: 0,
-    });
+    onAggressivePrune?.();
+
+    const aggressiveStats = createCompactionStats();
+    const aggressive = applyCaps(
+      messages,
+      {
+        textLimit: AGGRESSIVE_BLOCK_LIMIT,
+        toolInputLimitOld: AGGRESSIVE_BLOCK_LIMIT,
+        toolResultLimitOld: AGGRESSIVE_BLOCK_LIMIT,
+        toolInputLimitRecent: AGGRESSIVE_BLOCK_LIMIT,
+        toolResultLimitRecent: AGGRESSIVE_BLOCK_LIMIT,
+        windowTurns: 0,
+      },
+      aggressiveStats,
+    );
     const aggressiveSize = estimateBytes(aggressive);
-    log.info('[context-prune] step=aggressive', {
+    log.warn('[context-prune] step=aggressive', {
       messages: messages.length,
       before,
       first: firstSize,
       after: aggressiveSize,
       blockLimit: AGGRESSIVE_BLOCK_LIMIT,
+      ...statsForLog(aggressiveStats),
     });
     return aggressive;
   };

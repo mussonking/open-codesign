@@ -4,10 +4,17 @@ export interface CancellationLogger {
   info: (event: string, payload: { id: string }) => void;
 }
 
+export interface InFlightGeneration {
+  generationId: string;
+  startedAt: number;
+}
+
 export function cancelGenerationRequest(
   raw: unknown,
   inFlight: Map<string, AbortController>,
   logIpc: CancellationLogger,
+  inFlightByDesign?: Map<string, InFlightGeneration>,
+  inFlightByWorkspace?: Map<string, InFlightGeneration>,
 ): void {
   if (typeof raw !== 'string') {
     throw new CodesignError(
@@ -21,7 +28,88 @@ export function cancelGenerationRequest(
 
   controller.abort();
   inFlight.delete(raw);
+  if (inFlightByDesign !== undefined) {
+    for (const [designId, generation] of inFlightByDesign) {
+      if (generation.generationId === raw) inFlightByDesign.delete(designId);
+    }
+  }
+  if (inFlightByWorkspace !== undefined) {
+    for (const [workspaceKey, generation] of inFlightByWorkspace) {
+      if (generation.generationId === raw) inFlightByWorkspace.delete(workspaceKey);
+    }
+  }
   logIpc.info('generate.cancelled', { id: raw });
+}
+
+export async function withInFlightGeneration<T>(
+  id: string,
+  inFlight: Map<string, AbortController>,
+  controller: AbortController,
+  run: () => Promise<T>,
+): Promise<T> {
+  inFlight.set(id, controller);
+  try {
+    return await run();
+  } finally {
+    if (inFlight.get(id) === controller) {
+      inFlight.delete(id);
+    }
+  }
+}
+
+export async function withInFlightGenerationForDesign<T>(
+  id: string,
+  designId: string,
+  inFlight: Map<string, AbortController>,
+  inFlightByDesign: Map<string, InFlightGeneration>,
+  controller: AbortController,
+  run: () => Promise<T>,
+): Promise<T> {
+  const existing = inFlightByDesign.get(designId);
+  if (existing !== undefined && existing.generationId !== id) {
+    throw new CodesignError(
+      'A generation is already running for this design. Wait for it to finish or stop it before continuing.',
+      'GENERATION_ALREADY_RUNNING',
+    );
+  }
+  const startedAt = existing?.startedAt ?? Date.now();
+  inFlightByDesign.set(designId, { generationId: id, startedAt });
+  try {
+    return await withInFlightGeneration(id, inFlight, controller, run);
+  } finally {
+    if (inFlightByDesign.get(designId)?.generationId === id) {
+      inFlightByDesign.delete(designId);
+    }
+  }
+}
+
+export function acquireInFlightWorkspaceGeneration(
+  id: string,
+  workspaceKey: string,
+  inFlightByWorkspace: Map<string, InFlightGeneration>,
+): () => void {
+  const existing = inFlightByWorkspace.get(workspaceKey);
+  if (existing !== undefined && existing.generationId !== id) {
+    throw new CodesignError(
+      'A generation is already running for this workspace. Wait for it to finish or stop it before continuing.',
+      'GENERATION_ALREADY_RUNNING',
+    );
+  }
+  const startedAt = existing?.startedAt ?? Date.now();
+  inFlightByWorkspace.set(workspaceKey, { generationId: id, startedAt });
+  return () => {
+    if (inFlightByWorkspace.get(workspaceKey)?.generationId === id) {
+      inFlightByWorkspace.delete(workspaceKey);
+    }
+  };
+}
+
+export function listInFlightGenerations(
+  inFlightByDesign: ReadonlyMap<string, InFlightGeneration>,
+): Array<{ designId: string; generationId: string; startedAt: number }> {
+  return [...inFlightByDesign.entries()]
+    .map(([designId, generation]) => ({ designId, ...generation }))
+    .sort((a, b) => a.designId.localeCompare(b.designId));
 }
 
 export interface GenerationTimeoutLogger {

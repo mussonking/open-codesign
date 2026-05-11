@@ -1,6 +1,6 @@
 {
   "name": "@open-codesign/exporters",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
@@ -18,6 +18,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@open-codesign/runtime": "workspace:*",
     "@open-codesign/shared": "workspace:*",
     "pptxgenjs": "^4.0.1",
     "puppeteer-core": "^24.42.0",
@@ -25,7 +26,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
-    "typescript": "^5.7.2",
-    "vitest": "^2.1.8"
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.5"
   }
 }

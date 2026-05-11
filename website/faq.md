@@ -63,7 +63,7 @@ Yes. Open CoDesign supports ChatGPT Plus / Codex OAuth subscription login as of 
 
 ## Does Open CoDesign send my prompts or designs to any third party?
 
-No. Designs, prompts, and scans live on your machine. v0.1 uses SQLite for design history plus a TOML config at `~/.config/open-codesign/config.toml` with file mode 0600; v0.2 migrates designs into JSONL sessions and workspace files. The only outbound network traffic is directly to the model provider you configure with your own API key. No telemetry by default.
+No. Designs, prompts, and scans live on your machine. v0.2 stores design sessions in JSONL and keeps generated sources in workspace files, with configuration in `~/.config/open-codesign/config.toml`. The only outbound network traffic is directly to the model provider you configure with your own API key. No telemetry by default.
 
 ## Which AI models does Open CoDesign support?
 
@@ -94,18 +94,15 @@ Heavy features like PDF export (local Chrome) and PPTX generation are lazy-loade
 Fastest: use a package manager.
 
 ```bash
-# Windows
-winget install OpenCoworkAI.OpenCoDesign
-
 # macOS
 brew install --cask opencoworkai/tap/open-codesign
 
-# Windows (alternative)
+# Windows
 scoop bucket add opencoworkai https://github.com/OpenCoworkAI/scoop-bucket
-scoop install open-codesign
+scoop install opencoworkai/open-codesign
 ```
 
-Or download the installer directly from [GitHub Releases](https://github.com/OpenCoworkAI/open-codesign/releases). Every release ships `SHA256SUMS.txt` and a CycloneDX SBOM for verification.
+Or download the installer directly from [GitHub Releases](https://github.com/OpenCoworkAI/open-codesign/releases). Every release ships `SHA256SUMS.txt` and a CycloneDX SBOM for verification. The winget package is submitted and waiting for Microsoft review; once it merges, `winget install OpenCoworkAI.OpenCoDesign` will become the Windows one-liner.
 
 ## Does Open CoDesign work offline?
 
@@ -121,9 +118,9 @@ Yes, when used with a local model runtime like Ollama. All generation flows thro
 - **Markdown exports** — with embedded frontmatter for static-site ingestion.
 - **AI-generated bitmap assets** — hero images, backgrounds, illustrations, logos, generated via gpt-image-2 or OpenRouter image models. Opt-in, off by default.
 
-## What's coming in v0.2?
+## What changed in v0.2?
 
-v0.2 is the Agentic Design update, expected in about one week. It turns Open CoDesign from a one-shot prompt-to-artifact generator into a local design agent:
+v0.2 is the Agentic Design update. It turns Open CoDesign from a one-shot prompt-to-artifact generator into a local design agent:
 
 - **Workspace-backed designs** — every design is a pi session with JSONL history and real files on disk
 - **Permissioned local tools** — read, write, edit, bash, grep, find, and ls flow through Open CoDesign's permission UI
@@ -146,13 +143,13 @@ The security model is:
 - **Signed SBOM per release.** CycloneDX supply-chain manifest attached to every GitHub Release.
 - **MIT license.** Audit the source yourself.
 
-Installers are unsigned as of v0.1.x. Apple Developer ID notarization and Windows Authenticode signing land in v0.5. Until then, the repo documents reliable manual-install instructions for each platform.
+Installers are unsigned as of v0.2.0. Apple Developer ID notarization and Windows Authenticode signing land in v0.5. Until then, the repo documents reliable manual-install instructions for each platform.
 
 ## How can I contribute to Open CoDesign?
 
 - **Report bugs** — open an issue with reproduction steps.
 - **Suggest features** — use [GitHub Discussions → Ideas](https://github.com/OpenCoworkAI/open-codesign/discussions/categories/ideas).
-- **Send PRs** — read [CONTRIBUTING.md](https://github.com/OpenCoworkAI/open-codesign/blob/main/CONTRIBUTING.md), run `pnpm lint && pnpm typecheck && pnpm test`, and add a changeset for user-visible changes.
+- **Send PRs** — read [CONTRIBUTING.md](https://github.com/OpenCoworkAI/open-codesign/blob/main/CONTRIBUTING.md). Sign commits with DCO, run `pnpm lint && pnpm typecheck && pnpm test`, add a changeset.
 - **Share what you built** — post in [Show & Tell](https://github.com/OpenCoworkAI/open-codesign/discussions/categories/show-and-tell). Standout posts get featured in release notes.
 
 ## Where can I get help?

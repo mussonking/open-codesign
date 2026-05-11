@@ -1,4 +1,10 @@
 import { CodesignError, ERROR_CODES } from '@open-codesign/shared';
+import {
+  collectLocalAssetsFromHtml,
+  type LocalAssetOptions,
+  rewriteHtmlLocalAssetReferences,
+} from './assets';
+import { buildHtmlDocument } from './html';
 import type { ExportResult } from './index';
 
 export interface ZipAsset {
@@ -8,9 +14,13 @@ export interface ZipAsset {
   content: Buffer | string;
 }
 
-export interface ExportZipOptions {
+export interface ExportZipOptions extends LocalAssetOptions {
   /** Extra files to bundle alongside `index.html` and the README. */
   assets?: ZipAsset[];
+  /** Automatically bundle local src/href/url() references when assetBasePath is set. */
+  collectLocalAssets?: boolean;
+  /** Include the original source under source/<sourcePath>. Defaults to true. */
+  includeSource?: boolean;
   /** Override the README banner. */
   readmeTitle?: string;
 }
@@ -24,6 +34,9 @@ This bundle was exported from [open-codesign](https://github.com/OpenCoworkAI/op
 \`\`\`
 .
 ├── index.html      The exported design (open in any browser)
+├── manifest.json   Machine-readable export metadata
+├── source/         Original design source used for this export
+├── DESIGN.md       Design system handoff file (when present in workspace)
 ├── assets/         Linked assets (images, fonts, scripts)
 └── README.md       This file
 \`\`\`
@@ -31,12 +44,13 @@ This bundle was exported from [open-codesign](https://github.com/OpenCoworkAI/op
 ## Notes
 
 - Generated: ${generatedAt}
-- The HTML is self-contained; opening \`index.html\` directly works without a server.
-- To re-edit, open the bundle in open-codesign via *File → Import bundle*.
+- \`index.html\` is the portable rendered handoff.
+- \`source/\` preserves the editable source used to produce this export.
 `;
 
 /**
- * Bundle an HTML artifact + assets into a portable ZIP using `zip-lib`.
+ * Bundle a design source artifact + assets into a portable ZIP using `zip-lib`.
+ * JSX sources are first exported as browser-openable `index.html`.
  *
  * Tier 1: deterministic layout (`index.html` at root, assets under `assets/`,
  * README at root). We pick zip-lib over yauzl/jszip because it ships ~80 KB,
@@ -44,7 +58,7 @@ This bundle was exported from [open-codesign](https://github.com/OpenCoworkAI/op
  * archive in memory (PRINCIPLES §1).
  */
 export async function exportZip(
-  htmlContent: string,
+  artifactSource: string,
   destinationPath: string,
   opts: ExportZipOptions = {},
 ): Promise<ExportResult> {
@@ -55,13 +69,22 @@ export async function exportZip(
 
   const stagingDir = await fs.mkdtemp(path.join(os.tmpdir(), 'codesign-zip-'));
   try {
-    const indexPath = path.join(stagingDir, 'index.html');
-    await fs.writeFile(indexPath, htmlContent, 'utf8');
+    const htmlDocument = buildHtmlDocument(artifactSource, {
+      prettify: false,
+      sourcePath: opts.sourcePath,
+    });
+    const collectedAssets =
+      (opts.collectLocalAssets ?? true) ? await collectLocalAssetsFromHtml(htmlDocument, opts) : [];
+    const exportHtml =
+      (opts.collectLocalAssets ?? true)
+        ? rewriteHtmlLocalAssetReferences(htmlDocument, opts)
+        : htmlDocument;
 
-    const readme = README_TEMPLATE(
-      opts.readmeTitle ?? 'open-codesign export',
-      new Date().toISOString(),
-    );
+    const indexPath = path.join(stagingDir, 'index.html');
+    await fs.writeFile(indexPath, exportHtml, 'utf8');
+
+    const generatedAt = new Date().toISOString();
+    const readme = README_TEMPLATE(opts.readmeTitle ?? 'open-codesign export', generatedAt);
     const readmePath = path.join(stagingDir, 'README.md');
     await fs.writeFile(readmePath, readme, 'utf8');
 
@@ -69,13 +92,64 @@ export async function exportZip(
     zip.addFile(indexPath, 'index.html');
     zip.addFile(readmePath, 'README.md');
 
-    if (opts.assets) {
+    const designMdAssets: ZipAsset[] = [];
+    if (opts.assetRootPath) {
+      try {
+        const designMd = await fs.readFile(path.join(opts.assetRootPath, 'DESIGN.md'), 'utf8');
+        designMdAssets.push({ path: 'DESIGN.md', content: designMd });
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+      }
+    }
+    const sourceAssets: ZipAsset[] =
+      (opts.includeSource ?? true)
+        ? [
+            {
+              path: sourceArchivePath(opts.sourcePath ?? 'App.jsx'),
+              content: artifactSource,
+            },
+          ]
+        : [];
+    const manifestFiles = [
+      'index.html',
+      'README.md',
+      'manifest.json',
+      ...collectedAssets.map((asset) => asset.path),
+      ...designMdAssets.map((asset) => asset.path),
+      ...sourceAssets.map((asset) => asset.path),
+      ...(opts.assets ?? []).map((asset) => asset.path.replace(/\\/g, '/').replace(/^\/+/, '')),
+    ]
+      .filter((file, index, list) => file.length > 0 && list.indexOf(file) === index)
+      .sort((a, b) => a.localeCompare(b));
+    const manifest: ZipAsset = {
+      path: 'manifest.json',
+      content: `${JSON.stringify(
+        {
+          schemaVersion: 1,
+          generatedAt,
+          sourcePath: opts.sourcePath ?? 'App.jsx',
+          files: manifestFiles,
+        },
+        null,
+        2,
+      )}\n`,
+    };
+    const assets = [
+      ...collectedAssets,
+      ...designMdAssets,
+      ...sourceAssets,
+      manifest,
+      ...(opts.assets ?? []),
+    ];
+    if (assets.length > 0) {
       const stagingResolved = path.resolve(stagingDir);
-      for (const asset of opts.assets) {
+      const written = new Set<string>();
+      for (const asset of assets) {
         // Normalize backslashes first: on POSIX `path.resolve` treats `\` as a
         // literal char, so a Windows-style ZIP entry like `..\..\etc\passwd`
         // would slip past the containment check unless rewritten to `/`.
         const normalized = asset.path.replace(/\\/g, '/').replace(/^\/+/, '');
+        if (written.has(normalized)) continue;
         const localPath = path.resolve(stagingDir, normalized);
         const rel = path.relative(stagingResolved, localPath);
         if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) {
@@ -87,6 +161,7 @@ export async function exportZip(
         await fs.mkdir(path.dirname(localPath), { recursive: true });
         await fs.writeFile(localPath, asset.content);
         zip.addFile(localPath, normalized);
+        written.add(normalized);
       }
     }
 
@@ -103,4 +178,20 @@ export async function exportZip(
   } finally {
     await fs.rm(stagingDir, { recursive: true, force: true });
   }
+}
+
+function sourceArchivePath(sourcePath: string): string {
+  const normalized = sourcePath
+    .trim()
+    .replace(/\\/g, '/')
+    .replace(/^\.\/+/, '');
+  if (
+    normalized.length === 0 ||
+    normalized.startsWith('/') ||
+    /^[A-Za-z][A-Za-z0-9+.-]*:/u.test(normalized) ||
+    normalized.split('/').some((part) => part.length === 0 || part === '.' || part === '..')
+  ) {
+    return 'source/App.jsx';
+  }
+  return `source/${normalized}`;
 }

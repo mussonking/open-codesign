@@ -18,15 +18,15 @@ vi.mock('react', async (importOriginal) => {
     default: {
       ...(actual as typeof actual & { default: Record<string, unknown> }).default,
       useState: mockUseState,
-      useSyncExternalStore: (sub: unknown, getSnap: () => unknown) => getSnap(),
+      useSyncExternalStore: (_sub: unknown, getSnap: () => unknown) => getSnap(),
     },
     useState: mockUseState,
-    useSyncExternalStore: (sub: unknown, getSnap: () => unknown) => getSnap(),
+    useSyncExternalStore: (_sub: unknown, getSnap: () => unknown) => getSnap(),
   };
 });
 
 import type { CodesignApi } from '../../../preload';
-import { useDesignFiles } from '../hooks/useDesignFiles';
+import { useLazyDesignFileTree } from '../hooks/useDesignFiles';
 import { useCodesignStore } from '../store';
 import { FilesPanel } from './FilesPanel';
 
@@ -41,9 +41,13 @@ vi.mock('../store', async (importOriginal) => {
     useCodesignStore: mockStoreHook,
   };
 });
-vi.mock('../hooks/useDesignFiles', () => ({
-  useDesignFiles: vi.fn(),
-}));
+vi.mock('../hooks/useDesignFiles', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../hooks/useDesignFiles')>();
+  return {
+    ...actual,
+    useLazyDesignFileTree: vi.fn(),
+  };
+});
 
 declare global {
   interface Window {
@@ -155,13 +159,14 @@ describe('FilesPanel workspace integration', () => {
       expect(mockUpdate).toHaveBeenCalledWith('design-1', '/home/user/workspace', false);
     });
 
-    it('updateWorkspace accepts null path to clear workspace', async () => {
-      const mockUpdate = vi.fn().mockResolvedValue(mockDesign({ workspacePath: null }));
+    it('updateWorkspace rejects null path at the product boundary', async () => {
+      const mockUpdate = vi.fn().mockRejectedValue(new Error('workspacePath cannot be null'));
       vi.mocked(api().snapshots.updateWorkspace).mockImplementation(mockUpdate);
 
-      await api().snapshots.updateWorkspace('design-1', null, false);
-
-      expect(mockUpdate).toHaveBeenCalledWith('design-1', null, false);
+      await expect(
+        // Cast keeps this regression test focused on runtime boundary behavior.
+        api().snapshots.updateWorkspace('design-1', null as never, false),
+      ).rejects.toThrow('workspacePath cannot be null');
     });
 
     it('openWorkspaceFolder accepts designId parameter', async () => {
@@ -212,23 +217,18 @@ describe('FilesPanel workspace integration', () => {
       }
     });
 
-    it('clear workspace: update with null → list', async () => {
+    it('rejects clear-workspace null updates', async () => {
       useCodesignStore.setState({
         designs: [mockDesign({ workspacePath: '/home/user/workspace' })],
       });
 
-      const mockUpdate = vi.fn().mockResolvedValue(mockDesign({ workspacePath: null }));
-      const mockList = vi.fn().mockResolvedValue([mockDesign({ workspacePath: null })]);
+      const mockUpdate = vi.fn().mockRejectedValue(new Error('workspacePath cannot be null'));
 
       vi.mocked(api().snapshots.updateWorkspace).mockImplementation(mockUpdate);
-      vi.mocked(api().snapshots.listDesigns).mockImplementation(mockList);
 
-      const updated = await api().snapshots.updateWorkspace('design-1', null, false);
-      expect(updated.workspacePath).toBeNull();
-
-      const designs = await api().snapshots.listDesigns();
-      useCodesignStore.setState({ designs });
-      expect(useCodesignStore.getState().designs[0]?.workspacePath).toBeNull();
+      await expect(
+        api().snapshots.updateWorkspace('design-1', null as never, false),
+      ).rejects.toThrow('workspacePath cannot be null');
     });
 
     it('change workspace: pick → update → list', async () => {
@@ -338,7 +338,7 @@ describe('FilesPanel workspace integration', () => {
       expect(current?.workspacePath).toBe('/path/one');
     });
 
-    it('handles design without workspace alongside designs with workspace', () => {
+    it('can represent legacy designs without workspace alongside current workspace-backed designs', () => {
       useCodesignStore.setState({
         designs: [
           mockDesign({ id: 'design-1', workspacePath: null }),
@@ -354,10 +354,12 @@ describe('FilesPanel workspace integration', () => {
 
     describe('FilesPanel rendering UI', () => {
       beforeEach(() => {
-        vi.mocked(useDesignFiles).mockReturnValue({
+        vi.mocked(useLazyDesignFileTree).mockReturnValue({
           files: [],
+          tree: [],
           loading: false,
           backend: 'snapshots',
+          loadDirectory: vi.fn(),
         });
         useCodesignStore.setState({
           currentDesignId: 'design-1',
@@ -374,6 +376,20 @@ describe('FilesPanel workspace integration', () => {
       it('renders unavailable indicator when folderExists is false', () => {
         const html = ReactDOMServer.renderToString(React.createElement(FilesPanel));
         expect(html).toContain('Folder not found on disk');
+      });
+
+      it('keeps open-folder available while generation locks workspace switching', () => {
+        useCodesignStore.setState({
+          isGenerating: true,
+          generatingDesignId: 'design-1',
+        });
+
+        const html = ReactDOMServer.renderToString(React.createElement(FilesPanel));
+        const openButton = html.match(/<button[^>]*title="Open folder"[^>]*>/)?.[0];
+
+        expect(openButton).toBeDefined();
+        expect(openButton).not.toContain('disabled=""');
+        expect(html).toContain('disabled=""');
       });
     });
   });

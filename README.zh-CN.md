@@ -35,7 +35,7 @@
 
 ## 最近更新
 
-- **v0.2.0** *（准备中，预计一周左右发布）* — Agentic Design：带真实工作区的设计会话 · 带权限的文件 / 工具循环 · 按需加载 skill 和 scaffold · `DESIGN.md` 设计系统
+- **v0.2.0** *（2026-05-09）* — Agentic Design：带真实工作区的设计会话 · 带权限的本地工具 · Files 面板升级 · provider 诊断 · 安全加固 · `DESIGN.md` 设计系统
 - **v0.1.4** *（2026-04-23）* — AI 图像生成 · 支持 ChatGPT Plus / Codex 订阅登录 · CLIProxyAPI 一键导入 · API 配置稳定性优化
 - **v0.1.3** *（2026-04-21）* — 修复 Gemini `models/` 前缀 key · 修复 OpenAI 兼容中转 "instructions required" 报错 · 新增第三方中转 SSE 截断提示
 - **v0.1.2** *（2026-04-21）* — 发版流程 · Homebrew / winget / Scoop 打包清单
@@ -80,7 +80,7 @@ Open CoDesign 可以把一句自然语言提示词，直接变成一个完成度
 | 支持自带 Key | ✅ 任意提供商 | ❌ 仅 Anthropic | ❌ 仅 Vercel | ⚠️ 有限制 |
 | 本地 / 离线 | ✅ 本地应用 | ❌ 云端 | ❌ 云端 | ❌ 云端 |
 | 模型支持 | ✅ 20+（Claude、GPT、Gemini、Ollama…） | Claude only | GPT-4o | Multi-LLM |
-| 版本历史 | ✅ 本地 SQLite 快照 | ❌ | ❌ | ❌ |
+| 版本历史 | ✅ 本地 session + 工作区文件 | ❌ | ❌ | ❌ |
 | 数据隐私 | ✅ 应用状态保留在本地 | ❌ 云端处理 | ❌ 云端 | ❌ 云端 |
 | 可编辑导出 | ✅ HTML、PDF、PPTX、ZIP、Markdown | ⚠️ 有限制 | ⚠️ 有限制 | ⚠️ 有限制 |
 | 价格 | ✅ 应用免费，仅承担模型 token 成本 | 💳 订阅制 | 💳 订阅制 | 💳 订阅制 |
@@ -132,17 +132,18 @@ Open CoDesign 可以把一句自然语言提示词，直接变成一个完成度
 
 ### 1. 安装
 
-**一行命令**（推荐）：
+**包管理器**（推荐）：
 
 ```bash
-# Windows
-winget install OpenCoworkAI.OpenCoDesign
-
 # macOS
 brew install --cask opencoworkai/tap/open-codesign
+
+# Windows — Scoop
+scoop bucket add opencoworkai https://github.com/OpenCoworkAI/scoop-bucket
+scoop install opencoworkai/open-codesign
 ```
 
-**或从 [GitHub Releases](https://github.com/OpenCoworkAI/open-codesign/releases) 直接下载安装包**（v0.1.x）：
+**或从 [v0.2.0 GitHub Release](https://github.com/OpenCoworkAI/open-codesign/releases/tag/v0.2.0) 直接下载安装包**：
 
 | 平台 | 文件 |
 |---|---|
@@ -161,14 +162,16 @@ brew install --cask opencoworkai/tap/open-codesign
 
 | 管理器 | 命令 | 状态 |
 |---|---|---|
-| Scoop（Windows） | `scoop bucket add opencoworkai https://github.com/OpenCoworkAI/scoop-bucket && scoop install open-codesign` | 🟢 可用 |
-| Flathub（Linux） | `flatpak install flathub ai.opencowork.codesign` | ⏸ 延后到 v0.2（需要签名构建 + AppStream 元数据） |
+| Homebrew Cask（macOS） | `brew install --cask opencoworkai/tap/open-codesign` | 🟢 可用 |
+| Scoop（Windows） | `scoop bucket add opencoworkai https://github.com/OpenCoworkAI/scoop-bucket && scoop install opencoworkai/open-codesign` | 🟢 可用 |
+| winget（Windows） | `winget install OpenCoworkAI.OpenCoDesign` | 🟡 PR 已提交，等待 Microsoft review |
+| Flathub（Linux） | `flatpak install flathub ai.opencowork.codesign` | ⏸ 延后处理，需要签名构建 + AppStream 元数据 |
 | Snap（Linux） | `snap install --dangerous open-codesign-*.snap` | 🟡 随 release 尽量附带，尚未接入 Snap Store |
 
-每次 tag push 后 CI 会把 SHA 自动写回 `packaging/`，winget PR 合并后后续版本会自动提 bump PR。下游镜像流程见各个 `packaging/*/README.md`。
+每次 stable tag push 后，CI 会把 SHA 自动写回 `packaging/`，并在仓库 secret 配好时同步 Homebrew / Scoop 下游仓库。winget 的首次提交还在 Microsoft review；等包名被接受后，后续版本可以由 release workflow 自动提 bump。下游镜像流程见各个 `packaging/*/README.md`。
 </details>
 
-> **v0.1 提示：** 当前安装包未签名。**macOS Sequoia 15+** 起，右键 → 打开 已不能绕过 Gatekeeper，即使在「系统设置 → 隐私与安全性」里点"仍要打开"也经常失败。最可靠的一行命令：
+> **未签名安装包提示：** 当前安装包还没有 Apple notarization 和 Windows Authenticode 签名。**macOS Sequoia 15+** 起，右键 → 打开 已不能绕过 Gatekeeper，即使在「系统设置 → 隐私与安全性」里点"仍要打开"也经常失败。最可靠的一行命令：
 >
 > ```sh
 > xattr -cr "/Applications/Open CoDesign.app"
@@ -247,24 +250,24 @@ brew install --cask opencoworkai/tap/open-codesign
 
 ## Roadmap
 
-当前版本是 v0.1.4，v0.2.0 正在准备中。优先级仍可能调整，但下一版主题已经确定：**Agentic Design**。
+当前版本是 v0.2.0，主题是 **Agentic Design**。
 
-### Now — v0.1.4 已发布
+### Now — v0.2.0 已发布
 
-- **AI 图像生成**：通过 OpenAI 图像模型或 OpenRouter 图像模型生成位图素材，默认关闭，可在设置里启用
-- **ChatGPT Plus / Codex 订阅登录**：一键 OAuth，适合不想手动粘贴 API Key 的用户
-- **CLIProxyAPI 一键导入**：自动发现正在运行的本地代理，并带入 Settings
-- **API 配置稳定性优化**：对 timeout、SSE 截断、缺少 `/models`、Messages API 不兼容等中转问题给出更清楚的诊断
-
-### Next — v0.2.0（Agentic Design）
-
-预计一周左右发布。v0.2 会把 Open CoDesign 从一次性生成器升级成一个本地设计 agent，每个设计都有真实工作区：
+v0.2 已经把 Open CoDesign 从一次性生成器升级成一个本地设计 agent，每个设计都有真实工作区：
 
 - **Design as session**：每个 design 都是一个 pi session，历史写入 JSONL，产物落在磁盘工作区
 - **带权限的 agent loop**：复用 pi 的 read、write、edit、bash、grep、find、ls，由 Open CoDesign 权限 UI 统一拦截
 - **按需调用设计工具**：`ask`、`scaffold`、`skill`、`preview`、`gen_image`、`tweaks`、`todos`、`done`
 - **`DESIGN.md` 作为设计系统源文件**：品牌 token 和设计决策写成可编辑文件，而不是存在模型记忆里
 - **v0.1 迁移路径**：旧 SQLite 设计会迁移到真实工作区和 session history
+
+### Previous — v0.1.4
+
+- **AI 图像生成**：通过 OpenAI 图像模型或 OpenRouter 图像模型生成位图素材，默认关闭，可在设置里启用
+- **ChatGPT Plus / Codex 订阅登录**：一键 OAuth，适合不想手动粘贴 API Key 的用户
+- **CLIProxyAPI 一键导入**：自动发现正在运行的本地代理，并带入 Settings
+- **API 配置稳定性优化**：对 timeout、SSE 截断、缺少 `/models`、Messages API 不兼容等中转问题给出更清楚的诊断
 
 ### Later — v0.2.x 及之后
 
@@ -306,13 +309,13 @@ Open CoDesign 在 [LINUX DO](https://linux.do/) 社区首发，感谢佬友们�
   <img src="https://raw.githubusercontent.com/OpenCoworkAI/open-codesign/main/website/public/community/wechat-group.jpg" alt="Open CoDesign 用户交流群微信二维码" width="260" />
 </p>
 
-> ⚠️ 微信群二维码每 7 天自动失效（当前截至 **5 月 4 日** 有效）。扫码失败请到 [GitHub Issues](https://github.com/OpenCoworkAI/open-codesign/issues) 留言，我们会更新这里的图片。
+> ⚠️ 微信群二维码每 7 天自动失效（当前截至 **5 月 16 日** 有效）。扫码失败请到 [GitHub Issues](https://github.com/OpenCoworkAI/open-codesign/issues) 留言，我们会更新这里的图片。
 
 英文或异步讨论：[GitHub Issues](https://github.com/OpenCoworkAI/open-codesign/issues) · 安全问题：[SECURITY.md](./SECURITY.md)。
 
 ## 参与贡献
 
-请先阅读 [CONTRIBUTING.md](./CONTRIBUTING.md)。较大的改动建议先开 issue，发 PR 前请先运行 `pnpm lint && pnpm typecheck && pnpm test`。
+请先阅读 [CONTRIBUTING.md](./CONTRIBUTING.md)。开始写代码前建议先开 issue，发 PR 前请先运行 `pnpm lint && pnpm typecheck && pnpm test`。
 
 ## 许可证
 

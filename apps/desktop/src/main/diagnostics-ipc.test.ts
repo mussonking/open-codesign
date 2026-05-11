@@ -2,7 +2,7 @@
  * Wiring test for diagnostics:v1:log → recordDiagnosticEvent.
  *
  * Proves that renderer `error`-level entries are persisted into the
- * diagnostic_events table, while `info` and `warn` are log-only.
+ * diagnostic event store, while `info` and `warn` are log-only.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -198,7 +198,7 @@ describe('diagnostics:v1:recordRendererError', () => {
 });
 
 describe('diagnostics:v1:log persistence', () => {
-  it('persists error-level entries into diagnostic_events', () => {
+  it('persists error-level entries into the diagnostic event store', () => {
     const db = initInMemoryDb();
     registerDiagnosticsIpc(db);
 
@@ -220,7 +220,7 @@ describe('diagnostics:v1:log persistence', () => {
     expect(rows[0]?.message).toBe('something exploded');
   });
 
-  it('falls back to RENDERER_ERROR when data.code is absent', () => {
+  it('uses RENDERER_ERROR when data.code is absent', () => {
     const db = initInMemoryDb();
     registerDiagnosticsIpc(db);
 
@@ -353,7 +353,7 @@ describe('diagnostics:v1:reportEvent', () => {
   }
 
   it('returns issueUrl + bundlePath + summaryMarkdown without any DB row', async () => {
-    // The Report flow no longer requires a diagnostic_events row — the
+    // The Report flow no longer requires a persisted diagnostic event row — the
     // ReportableError payload alone is enough to build the bundle.
     const db = initInMemoryDb();
     registerDiagnosticsIpc(db);
@@ -672,9 +672,9 @@ describe('redactSensitiveTomlFields', () => {
   it('masks the ciphertext field used by this codebase to persist secrets', () => {
     // Reproduces the real bundle leak a user reported on 2026-04-22: the
     // `[secrets.*] ciphertext = "..."` field was slipping through because
-    // it wasn't on the field allowlist. "plain:<value>" is the dev-mode
-    // pass-through encoding (see keychain.ts), so the raw token is right
-    // there in the exported zip.
+    // it wasn't on the field allowlist. Modern rows use safeStorage-backed
+    // `safe:<base64>`, but fallback and legacy config rows can still contain
+    // `plain:<value>`, so the raw token must never appear in the exported zip.
     const input = [
       '[secrets.claude-code-imported]',
       'ciphertext = "plain:another-your-anthropic-auth-token"',

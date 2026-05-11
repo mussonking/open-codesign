@@ -1,17 +1,15 @@
 import {
   BUILTIN_PROVIDERS,
-  CHATGPT_CODEX_PROVIDER_ID,
   CodesignError,
   type Config,
   ERROR_CODES,
+  isSupportedOnboardingProvider,
   type ModelRef,
   PROVIDER_SHORTLIST,
-  type ProviderCapabilities,
   type ProviderEntry,
   type ReasoningLevel,
-  type WireApi,
-  isSupportedOnboardingProvider,
   resolveProviderCapabilities,
+  type WireApi,
 } from '@open-codesign/shared';
 import { maskSecret } from './keychain';
 
@@ -50,7 +48,11 @@ export function getAddProviderDefaults(
   activeProvider: string;
   modelPrimary: string;
 } {
-  if (cfg === null || cfg.secrets[cfg.activeProvider] === undefined) {
+  if (
+    cfg === null ||
+    cfg.activeProvider.length === 0 ||
+    !providerHasUsableCredential(cfg, cfg.activeProvider)
+  ) {
     return {
       activeProvider: input.provider,
       modelPrimary: input.modelPrimary,
@@ -60,6 +62,13 @@ export function getAddProviderDefaults(
     activeProvider: cfg.activeProvider,
     modelPrimary: cfg.activeModel,
   };
+}
+
+function providerHasUsableCredential(cfg: Config, provider: string): boolean {
+  return (
+    cfg.secrets[provider] !== undefined ||
+    isKeylessProviderAllowed(provider, resolveEntryFor(cfg, provider))
+  );
 }
 
 export function assertProviderHasStoredSecret(cfg: Config, provider: string): void {
@@ -72,12 +81,8 @@ export function assertProviderHasStoredSecret(cfg: Config, provider: string): vo
 }
 
 export function isKeylessProviderAllowed(provider: string, entry?: ProviderEntry | null): boolean {
-  if (entry !== undefined && entry !== null) {
-    const capabilities = resolveProviderCapabilities(provider, entry);
-    if (capabilities.supportsKeyless) return true;
-  }
-  const isCodexFamily = provider.startsWith('codex-') || provider === CHATGPT_CODEX_PROVIDER_ID;
-  return isCodexFamily && entry?.requiresApiKey !== true && entry?.envKey === undefined;
+  if (entry === undefined || entry === null) return false;
+  return resolveProviderCapabilities(provider, entry).supportsKeyless === true;
 }
 
 function resolveEntryFor(cfg: Config, id: string): ProviderEntry | null {
@@ -111,7 +116,7 @@ export function toProviderRows(
     if (ref !== undefined) {
       // Prefer the persisted mask — avoids triggering a keychain password
       // prompt on unsigned macOS builds just to render the Settings row.
-      // Fall back to decrypting once for legacy configs that pre-date the
+      // Decrypt once for legacy configs that pre-date the
       // mask field; `migrateSecrets` should have rewritten them, but
       // we stay resilient in case migration didn't complete.
       if (ref.mask !== undefined && ref.mask.length > 0) {
@@ -149,8 +154,8 @@ export function toProviderRows(
         (isSupportedOnboardingProvider(provider)
           ? PROVIDER_SHORTLIST[provider].defaultPrimary
           : ''),
-      // codex-* providers are treated as no-auth / IP-gated by default —
-      // absent secret is a legitimate state, not a "missing key" warning.
+      // Missing secrets count as configured only for providers that explicitly
+      // declare keyless mode in their ProviderEntry/capabilities.
       hasKey: ref !== undefined || isKeylessProviderAllowed(provider, entry),
       ...(entry?.reasoningLevel !== undefined ? { reasoningLevel: entry.reasoningLevel } : {}),
       ...(rowError !== undefined ? { error: rowError } : {}),
@@ -181,21 +186,21 @@ export function computeDeleteProviderResult(cfg: Config, toDelete: string): Dele
     return { nextActive: null, modelPrimary: '' };
   }
 
-  const keepCurrent = cfg.activeProvider !== toDelete;
+  const keepCurrent = cfg.activeProvider !== toDelete && remaining.includes(cfg.activeProvider);
   const nextActive = keepCurrent ? cfg.activeProvider : (remaining[0] as string);
 
-  if (cfg.activeProvider === toDelete) {
-    const entry = resolveEntryFor(cfg, nextActive);
-    const fallbackModel = isSupportedOnboardingProvider(nextActive)
-      ? PROVIDER_SHORTLIST[nextActive].defaultPrimary
-      : (entry?.defaultModel ?? '');
-    return {
-      nextActive,
-      modelPrimary: fallbackModel,
-    };
+  if (keepCurrent) {
+    return { nextActive, modelPrimary: cfg.activeModel };
   }
 
-  return { nextActive, modelPrimary: cfg.activeModel };
+  const entry = resolveEntryFor(cfg, nextActive);
+  const nextModel = isSupportedOnboardingProvider(nextActive)
+    ? PROVIDER_SHORTLIST[nextActive].defaultPrimary
+    : (entry?.defaultModel ?? '');
+  return {
+    nextActive,
+    modelPrimary: nextModel,
+  };
 }
 
 /**
@@ -210,52 +215,8 @@ export interface ActiveModelResolution {
   queryParams: Record<string, string> | undefined;
   reasoningLevel: ReasoningLevel | undefined;
   allowKeyless: boolean;
-  capabilities: Required<ProviderCapabilities>;
-  explicitCapabilities: ProviderCapabilities | undefined;
   /** True when the renderer-supplied hint provider didn't match the canonical active. */
   overridden: boolean;
-}
-
-/**
- * Shared provider resolution for any main-process path that needs the stored
- * provider contract as persisted on disk, regardless of whether the caller is
- * about to generate, list models, or probe the connection.
- */
-export interface ProviderConfigResolution {
-  provider: string;
-  defaultModel: string;
-  baseUrl: string;
-  wire: WireApi;
-  httpHeaders: Record<string, string> | undefined;
-  queryParams: Record<string, string> | undefined;
-  reasoningLevel: ReasoningLevel | undefined;
-  allowKeyless: boolean;
-  capabilities: Required<ProviderCapabilities>;
-  explicitCapabilities: ProviderCapabilities | undefined;
-}
-
-export function resolveProviderConfig(cfg: Config, providerId: string): ProviderConfigResolution {
-  const entry = resolveEntryFor(cfg, providerId);
-  if (entry === null) {
-    throw new CodesignError(
-      `Provider "${providerId}" has no provider entry on disk.`,
-      ERROR_CODES.PROVIDER_NOT_SUPPORTED,
-    );
-  }
-  const allowKeyless = isKeylessProviderAllowed(providerId, entry);
-  const capabilities = resolveProviderCapabilities(providerId, entry);
-  return {
-    provider: providerId,
-    defaultModel: entry.defaultModel,
-    baseUrl: entry.baseUrl,
-    wire: entry.wire,
-    httpHeaders: entry.httpHeaders,
-    queryParams: entry.queryParams,
-    reasoningLevel: entry.reasoningLevel,
-    allowKeyless,
-    capabilities,
-    explicitCapabilities: entry.capabilities,
-  };
 }
 
 export function resolveActiveModel(
@@ -263,19 +224,30 @@ export function resolveActiveModel(
   hint: { provider: string; modelId: string },
 ): ActiveModelResolution {
   const activeId = cfg.activeProvider;
-  const resolved = resolveProviderConfig(cfg, activeId);
+  const entry = resolveEntryFor(cfg, activeId);
+  if (entry === null) {
+    throw new CodesignError(
+      `Active provider "${activeId}" has no provider entry on disk.`,
+      ERROR_CODES.PROVIDER_NOT_SUPPORTED,
+    );
+  }
+  const allowKeyless = isKeylessProviderAllowed(activeId, entry);
+  if (cfg.secrets[activeId] === undefined && !allowKeyless) {
+    throw new CodesignError(
+      `No API key stored for active provider "${activeId}". Re-run onboarding to add one.`,
+      ERROR_CODES.PROVIDER_KEY_MISSING,
+    );
+  }
   const overridden = activeId !== hint.provider;
   const modelId = overridden ? cfg.activeModel : hint.modelId;
   return {
     model: { provider: activeId, modelId },
-    baseUrl: resolved.baseUrl,
-    wire: resolved.wire,
-    httpHeaders: resolved.httpHeaders,
-    queryParams: resolved.queryParams,
-    reasoningLevel: resolved.reasoningLevel,
-    allowKeyless: resolved.allowKeyless,
-    capabilities: resolved.capabilities,
-    explicitCapabilities: resolved.explicitCapabilities,
+    baseUrl: entry.baseUrl,
+    wire: entry.wire,
+    httpHeaders: entry.httpHeaders,
+    queryParams: entry.queryParams,
+    reasoningLevel: entry.reasoningLevel,
+    allowKeyless,
     overridden,
   };
 }

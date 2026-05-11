@@ -15,9 +15,54 @@ interface ModelSwitcherProps {
 // DeepSeek/Zhipu return 40+ IDs).
 const SEARCH_VISIBILITY_THRESHOLD = 12;
 
-function shortenModelLabel(model: string): string {
-  const stripped = model.replace(/^(claude-|gpt-|gemini-)/, '');
-  return stripped.includes('/') ? (stripped.split('/').pop() ?? stripped) : stripped;
+function titleCaseWords(value: string): string {
+  return value
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((word) => {
+      if (/^[A-Z0-9]+$/.test(word)) return word;
+      return `${word.slice(0, 1).toUpperCase()}${word.slice(1)}`;
+    })
+    .join(' ');
+}
+
+export function formatProviderLabel(label: string): string {
+  const trimmed = label.trim();
+  if (trimmed.length === 0) return label;
+  if (/^[a-z0-9_-]+$/i.test(trimmed) && /[-_]/.test(trimmed)) return titleCaseWords(trimmed);
+  return trimmed;
+}
+
+export function formatCompactProviderLabel(label: string): string {
+  const formatted = formatProviderLabel(label);
+  const compact = formatted
+    .replace(/\s+\(imported\)$/i, '')
+    .replace(/\s+Imported$/i, '')
+    .trim();
+  return compact.length > 0 ? compact : formatted;
+}
+
+export function formatModelLabel(model: string): string {
+  const leaf = model.includes('/') ? (model.split('/').pop() ?? model) : model;
+  const gpt = leaf.match(/^gpt[-_]?(.+)$/i);
+  if (gpt?.[1]) return `GPT-${gpt[1]}`;
+  const claude = leaf.match(/^claude[-_](sonnet|opus|haiku)[-_](.+)$/i);
+  if (claude?.[1] && claude[2])
+    return `Claude ${titleCaseWords(claude[1])} ${claude[2].replace(/-/g, '.')}`;
+  const gemini = leaf.match(/^gemini[-_](.+)$/i);
+  if (gemini?.[1]) return `Gemini ${gemini[1].replace(/-/g, ' ')}`;
+  return leaf;
+}
+
+export function formatCompactModelLabel(providerLabel: string, modelLabel: string): string {
+  const providerLower = providerLabel.toLowerCase();
+  if (
+    (providerLower.includes('claude') || providerLower.includes('anthropic')) &&
+    modelLabel.startsWith('Claude ')
+  ) {
+    return modelLabel.slice('Claude '.length);
+  }
+  return modelLabel;
 }
 
 /**
@@ -108,7 +153,10 @@ export function ModelSwitcher({ variant }: ModelSwitcherProps) {
   if (!provider || !currentModel) return null;
 
   const activeProviderRow = providerRows?.find((r) => r.provider === provider) ?? null;
-  const providerLabel = activeProviderRow?.label ?? provider;
+  const fullProviderLabel = formatProviderLabel(activeProviderRow?.label ?? provider);
+  const providerLabel = formatCompactProviderLabel(fullProviderLabel);
+  const modelLabel = formatModelLabel(currentModel);
+  const compactModelLabel = formatCompactModelLabel(providerLabel, modelLabel);
 
   async function switchModel(model: string) {
     if (!window.codesign || !provider || model === currentModel) {
@@ -146,25 +194,28 @@ export function ModelSwitcher({ variant }: ModelSwitcherProps) {
         onClick={() => setOpen((v) => !v)}
         className={
           isSidebar
-            ? 'inline-flex items-center gap-[3px] text-[11px] text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] transition-colors cursor-pointer'
-            : 'flex items-center gap-[var(--space-2)] rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface)] px-[var(--space-2_5)] py-[var(--space-1)] select-none hover:bg-[var(--color-surface-hover)] transition-colors'
+            ? 'inline-flex h-5 min-w-0 items-center gap-[3px] rounded-[var(--radius-sm)] px-[2px] text-[11px] text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-text-secondary)] cursor-pointer'
+            : 'inline-flex h-10 min-w-[220px] max-w-[340px] items-center gap-[var(--space-2)] rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-[var(--space-3)] select-none whitespace-nowrap transition-colors hover:bg-[var(--color-surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus-ring)]'
         }
         aria-haspopup="listbox"
         aria-expanded={open}
+        title={isSidebar ? currentModel : `${fullProviderLabel} · ${currentModel}`}
       >
         {isSidebar ? (
-          <span className="truncate" style={{ fontFamily: 'var(--font-mono)' }}>
-            {currentModel}
+          <span className="truncate" style={{ fontFamily: 'var(--font-sans)' }}>
+            {modelLabel}
           </span>
         ) : (
-          <span className="text-[var(--text-xs)] leading-none flex items-center gap-[6px]">
-            <span className="text-[var(--color-text-secondary)]">{providerLabel}</span>
-            <span className="text-[var(--color-border-strong)]">·</span>
+          <span className="inline-flex min-w-0 flex-1 items-center gap-[6px] overflow-hidden text-[var(--text-xs)] leading-none">
+            <span className="min-w-[72px] basis-[45%] truncate text-[var(--color-text-secondary)]">
+              {providerLabel}
+            </span>
+            <span className="shrink-0 text-[var(--color-border-strong)]">·</span>
             <span
-              className="text-[var(--color-text-muted)]"
-              style={{ fontFamily: 'var(--font-mono)' }}
+              className="min-w-[64px] basis-[55%] truncate text-[var(--color-text-muted)]"
+              style={{ fontFamily: 'var(--font-sans)' }}
             >
-              {shortenModelLabel(currentModel)}
+              {compactModelLabel}
             </span>
           </span>
         )}
@@ -180,7 +231,7 @@ export function ModelSwitcher({ variant }: ModelSwitcherProps) {
           className={`absolute z-50 overflow-hidden rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-elevated)] shadow-[var(--shadow-card)] ${
             isSidebar
               ? 'bottom-full mb-[var(--space-1)] left-0 min-w-[220px]'
-              : 'top-full mt-[var(--space-1)] right-0 min-w-[260px]'
+              : 'top-full mt-[var(--space-1)] right-0 min-w-[320px]'
           }`}
         >
           {showSearch && (
@@ -200,8 +251,11 @@ export function ModelSwitcher({ variant }: ModelSwitcherProps) {
                 aria-label={t('topbar.modelSwitcher.searchAriaLabel', {
                   defaultValue: 'Filter models by name',
                 })}
-                className="w-full h-[var(--size-control-xs)] pl-[calc(var(--space-2)+var(--size-icon-xs)+var(--space-1_5))] pr-[calc(var(--space-2)+var(--size-icon-sm))] rounded-[var(--radius-sm)] bg-transparent border-0 text-[var(--text-xs)] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-focus-ring)]"
-                style={{ fontFamily: 'var(--font-mono)' }}
+                className="w-full h-[var(--size-control-xs)] pr-[calc(var(--space-2)+var(--size-icon-sm))] rounded-[var(--radius-sm)] bg-transparent border-0 text-[var(--text-xs)] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-muted)] focus:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-focus-ring)]"
+                style={{
+                  fontFamily: 'var(--font-mono)',
+                  paddingLeft: 'calc(var(--space-2) + var(--size-icon-xs) + var(--space-1_5))',
+                }}
               />
               {query.length > 0 && (
                 <button
@@ -221,7 +275,7 @@ export function ModelSwitcher({ variant }: ModelSwitcherProps) {
             </div>
           )}
 
-          <div className="max-h-[280px] overflow-y-auto py-[var(--space-1)]">
+          <div className="codesign-scroll-area max-h-[280px] overflow-y-auto py-[var(--space-1)]">
             {loading ? (
               <div className="flex items-center justify-center py-[var(--space-3)]">
                 <Loader2 className="w-4 h-4 animate-spin text-[var(--color-text-muted)]" />

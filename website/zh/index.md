@@ -7,7 +7,7 @@ description: Open CoDesign 是一款开源桌面 AI 设计工具，Claude Design
 hero:
   name: Open CoDesign
   text: 用心设计。
-  tagline: 开源桌面 AI 设计工具。v0.1.4 已发布；v0.2.0 正在准备 Agentic Design 大更新，会带来真实工作区和带权限的本地工具循环。
+  tagline: 开源桌面 AI 设计工具。v0.2.0 带来 Agentic Design：真实工作区、带权限的本地工具循环、按需加载 skill，以及 DESIGN.md 设计系统。
   image:
     src: /logo-hero.png
     alt: Open CoDesign — 开源 AI 设计工具
@@ -31,7 +31,7 @@ features:
     details: 已经在用 Claude Code 或 Codex？Open CoDesign 直接读你的配置文件——provider、model、API Key，一次带过来。
   - icon: 🏡
     title: 你的电脑就是云
-    details: 设计稿、提示词和设置都在本地磁盘。v0.1 用 SQLite 保存设计历史；v0.2 会迁到 JSONL session 加真实工作区文件。无需注册账号，默认无遥测。
+    details: 设计稿、提示词和设置都在本地磁盘。v0.2 使用 JSONL session，并把生成源码放在真实工作区文件里。无需注册账号，默认无遥测。
   - icon: 🪄
     title: 12 个设计 Skill 开箱即用
     details: 内置 12 个设计 skill 模块——仪表盘、落地页、幻灯片、定价页、聊天 UI、数据表格、日历、玻璃质感、编辑排版等等。在任何项目添加你自己的 SKILL.md，教会模型你的审美。
@@ -49,7 +49,7 @@ features:
     details: 任一设计都能在真实手机框或平板宽度里预览，与完整画布并排查看。导出前先看响应式故事。
   - icon: 🧬
     title: v0.2：Agentic Design
-    details: 每个 design 都会变成长程 session，并绑定真实工作区。Agent 可以读写文件、运行带权限的工具、预览自检，并把设计系统决策写进文件。
+    details: 每个 design 现在都是长程 session，并绑定真实工作区。Agent 可以读写文件、运行带权限的工具、预览自检，并把设计系统决策写进文件。
   - icon: 📐
     title: DESIGN.md 作为设计记忆
     details: 品牌值和设计 token 写进 DESIGN.md，而不是存在模型记忆里。你可以带入自己的设计系统，也可以让 agent 在生成过程中维护它。
@@ -112,7 +112,7 @@ import { withBase } from 'vitepress'
   </figure>
   <figure>
     <img :src="withBase('/screenshots/hub-your-designs.png')" alt="设计主页 — 所有生成过的 artifact" />
-    <figcaption><b>每次迭代都在。</b>设计历史保存在本地；v0.2 会迁到 JSONL session 加真实工作区文件。</figcaption>
+    <figcaption><b>每次迭代都在。</b>设计历史保存在本地；v0.2 使用 JSONL session 加真实工作区文件。</figcaption>
   </figure>
   <figure>
     <img :src="withBase('/screenshots/hub-examples.png')" alt="内置示例库 — 15 个即可运行的设计命题" />
@@ -170,7 +170,7 @@ import { withBase } from 'vitepress'
 <div class="codesign-community">
   <div class="community-card">
     <h3>用户交流群（微信）</h3>
-    <p class="community-hint">扫码加入中文讨论组。二维码每 7 天刷新，当前截至 <strong>5 月 4 日</strong> 有效。过期请到 <a href="https://github.com/OpenCoworkAI/open-codesign/issues">GitHub Issues</a> 留言提醒我们更新。</p>
+    <p class="community-hint">扫码加入中文讨论组。二维码每 7 天刷新，当前截至 <strong>5 月 16 日</strong> 有效。过期请到 <a href="https://github.com/OpenCoworkAI/open-codesign/issues">GitHub Issues</a> 留言提醒我们更新。</p>
     <img
       :src="withBase('/community/wechat-group.jpg')"
       alt="Open CoDesign 用户交流群微信二维码"

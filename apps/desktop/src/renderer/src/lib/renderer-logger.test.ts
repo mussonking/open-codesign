@@ -14,22 +14,27 @@ describe('installRendererLogBridge', () => {
   let logSpy: ReturnType<typeof vi.fn>;
   let origWarn: typeof console.warn;
   let origError: typeof console.error;
+  let listeners: Map<string, EventListenerOrEventListenerObject>;
 
   beforeEach(() => {
     origWarn = console.warn;
     origError = console.error;
     logSpy = vi.fn().mockResolvedValue(undefined);
+    listeners = new Map();
 
     // Provide a minimal window.codesign stub.
     Object.defineProperty(globalThis, 'window', {
       value: {
         ...((globalThis as typeof globalThis & { window?: unknown }).window ?? {}),
+        location: { protocol: 'http:', hostname: 'localhost' },
         codesign: {
           diagnostics: {
             log: logSpy,
           },
         },
-        addEventListener: vi.fn(),
+        addEventListener: vi.fn((type: string, listener: EventListenerOrEventListenerObject) => {
+          listeners.set(type, listener);
+        }),
       },
       writable: true,
     });
@@ -57,6 +62,48 @@ describe('installRendererLogBridge', () => {
         level: 'error',
         scope: 'console',
         message: expect.stringContaining('something went wrong'),
+      }),
+    );
+  });
+
+  it('downgrades local Vite HMR console errors to warn diagnostics', async () => {
+    const { installRendererLogBridge } = await import('./renderer-logger');
+    installRendererLogBridge();
+
+    console.error(
+      '[vite] Failed to reload /src/components/chat/WorkingCard.tsx. This could be due to syntax errors or importing non-existent modules. (see errors above)',
+    );
+
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        schemaVersion: 1,
+        level: 'warn',
+        scope: 'console',
+        message: expect.stringContaining('[vite] Failed to reload'),
+      }),
+    );
+  });
+
+  it('downgrades ResizeObserver loop window errors to warn diagnostics', async () => {
+    const { installRendererLogBridge } = await import('./renderer-logger');
+    installRendererLogBridge();
+
+    const listener = listeners.get('error');
+    expect(typeof listener).toBe('function');
+    (listener as EventListener)({
+      message: 'ResizeObserver loop completed with undelivered notifications.',
+      filename: 'http://localhost:5174/',
+      lineno: 0,
+      colno: 0,
+      error: undefined,
+    } as unknown as Event);
+
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        schemaVersion: 1,
+        level: 'warn',
+        scope: 'window',
+        message: 'ResizeObserver loop completed with undelivered notifications.',
       }),
     );
   });

@@ -7,22 +7,26 @@ body {
   margin: 0;
   padding: 0;
   height: 100%;
+  overflow: hidden;
   font-family: var(--font-sans);
   background: var(--color-background);
   color: var(--color-text-primary);
   -webkit-font-smoothing: antialiased;
+  overscroll-behavior: none;
 }
 
 h1,
 h2,
 h3,
 .display {
-  font-family: var(--font-display);
-  font-weight: 500;
+  font-family: var(--font-sans);
+  font-weight: 600;
+  letter-spacing: 0;
 }
 
 #root {
   height: 100%;
+  overflow: hidden;
 }
 
 * {
@@ -49,17 +53,73 @@ h3,
 
 *:hover::-webkit-scrollbar-thumb,
 *:focus-within::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--color-text-tertiary) 35%, transparent);
+  background: color-mix(in srgb, var(--color-text-muted) 35%, transparent);
   background-clip: padding-box;
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background: color-mix(in srgb, var(--color-text-tertiary) 60%, transparent);
+  background: color-mix(in srgb, var(--color-text-muted) 60%, transparent);
   background-clip: padding-box;
 }
 
 *::-webkit-scrollbar-corner {
   background: transparent;
+}
+
+.codesign-scroll-area {
+  scrollbar-gutter: auto;
+  overscroll-behavior: contain;
+}
+
+.codesign-preview-scroll {
+  overscroll-behavior: contain;
+  scrollbar-gutter: auto;
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+.codesign-preview-scroll:hover,
+.codesign-preview-scroll:focus-within {
+  scrollbar-color: color-mix(in srgb, var(--color-text-muted) 26%, transparent) transparent;
+}
+
+.codesign-preview-scroll::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+.codesign-preview-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.codesign-preview-scroll::-webkit-scrollbar-thumb {
+  min-height: 48px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  background-clip: padding-box;
+}
+
+.codesign-preview-scroll:hover::-webkit-scrollbar-thumb,
+.codesign-preview-scroll:focus-within::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--color-text-muted) 20%, transparent);
+  background-clip: padding-box;
+}
+
+.codesign-preview-scroll::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--color-text-muted) 32%, transparent);
+  background-clip: padding-box;
+}
+
+.codesign-scroll-x {
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+
+.codesign-scroll-x::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 @keyframes overlay-in {
@@ -142,16 +202,26 @@ h3,
   animation: codesign-stream-blink 1.2s ease-in-out infinite;
 }
 
-/* Hide native scrollbar inside the prompt textarea — keeps the input clean
- * even when content overflows. Scroll still works via wheel/keyboard. */
 .codesign-prompt-textarea {
+  border: 0;
+  outline: none;
+  box-shadow: none;
+  background: transparent;
   scrollbar-width: none;
+}
+.codesign-prompt-textarea:focus,
+.codesign-prompt-textarea:focus-visible {
+  border: 0;
+  outline: none;
+  box-shadow: none;
 }
 .codesign-prompt-textarea::-webkit-scrollbar {
   display: none;
+  width: 0;
+  height: 0;
 }
 
-/* Markdown prose inside assistant chat bubbles */
+/* Markdown prose inside assistant chat bubbles and file previews */
 .codesign-prose p {
   margin: 0;
 }
@@ -179,6 +249,21 @@ h3,
   background: none;
   padding: 0;
   font-size: 12px;
+}
+.codesign-frontmatter {
+  border-bottom: 1px solid var(--color-border-muted);
+  margin-bottom: var(--space-4);
+  padding-bottom: var(--space-3);
+}
+.codesign-frontmatter summary {
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+.codesign-frontmatter pre {
+  margin-bottom: 0;
+  white-space: pre-wrap;
 }
 .codesign-prose ul,
 .codesign-prose ol {

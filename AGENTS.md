@@ -2,7 +2,7 @@
 
 Instructions for Codex and other AI coding agents working in this repository. Read this before making changes.
 
-This file is the canonical public agent guide. `CLAUDE.md` mirrors it for Claude Code. Maintainer-local `docs/VISION.md`, `docs/PRINCIPLES.md`, and `docs/v0.2-plan.md` may contain fresher planning details when present, but public contributors and bots must not assume those files exist.
+`CLAUDE.md` may lag behind the current plan. For Codex work, treat this file as the public source of truth. If local internal docs such as `docs/VISION.md`, `docs/PRINCIPLES.md`, or `docs/v0.2-plan.md` exist, use them as additional context; if they are missing, do not block public-contributor work on them.
 
 ## What This Project Is
 
@@ -12,7 +12,9 @@ The v0.2 direction is no longer a single-prompt generator. Each design is a long
 
 The original inspiration was Claude Design. The product boundary is now clearer: Open CoDesign borrows proven coding-agent mechanics, then adds design-specific tools and a local-first workspace model.
 
-`docs/` is mostly maintainer-local and gitignored. Some public research notes may exist, but internal plans, handoffs, and roadmap files usually do not. Do not cite `docs/**` in public PR review comments unless the exact file exists in the public checkout and is directly relevant.
+Product model: a `Design` owns a workspace. The agent edits design source files in that workspace; the preview runtime turns those sources into a rendered web document; exporters turn the rendered/source document into standard outputs such as HTML, PDF, PPTX, ZIP, or Markdown. In v0.2 the default source entry is `App.jsx`; `index.html` is reserved for standalone exports or legacy workspace files.
+
+`docs/` is gitignored. Maintainers may have internal plans, handoffs, and research locally; public contributors may not. Do not cite `docs/**` in public PR review comments unless the file exists in the public checkout.
 
 ## Hard Constraints
 
@@ -22,11 +24,23 @@ These are project commitments, not preferences:
 2. BYOK only. No hosted account, proxied API, or telemetry by default. User credentials stay in human-readable local config.
 3. Local-first storage. v0.2 uses pi JSONL sessions plus real workspace files. Existing v0.1 SQLite data may be migrated, but do not add new SQLite tables for sessions, chat history, comments, snapshots, or design files.
 4. Every design has a workspace. No sealed/open split in v0.2. The workspace filesystem is the source of truth for artifacts and assets.
-5. MIT-compatible permissive licenses only. Reject GPL, AGPL, SSPL, proprietary deps, and unclear copied assets. Check licenses before adding scaffolds, brand refs, or package deps.
+5. Shipped app/runtime dependencies, bundled assets, scaffolds, skills, brand refs, and copied code must be MIT-compatible permissive. Reject GPL, AGPL, SSPL, proprietary deps, and unclear copied assets in anything that is bundled, linked, imported by app code, or distributed to users. Workflow-only CI/release tools may use copyleft licenses when they are not vendored, bundled, linked, or copied into the product; document the reason and keep their outputs limited to ordinary metadata or manifests.
 6. Lazy-load heavy features. PPTX export, web capture, scaffolds, skills, brand refs, and image generation must load on demand rather than at app start.
 7. Reuse pi primitives first. `pi-coding-agent` owns sessions, built-in tools, bash execution, event streaming, model registry, provider registration, and capability data unless a design-specific need proves otherwise.
 8. Brand values are data, not model memory. Use `DESIGN.md`, user files, official CSS/SVG/screenshots, or brand URLs. Do not invent brand hex values from memory.
-9. PRs should satisfy Principles 5b: compatible, upgradeable, no bloat, elegant.
+9. PRs should stay compatible, upgradeable, lean, and elegant. If `docs/PRINCIPLES.md` is present, use its Principles 5b wording as the detailed checklist.
+
+## AI Visibility For Web Work
+
+When building or updating any website, project homepage, product page, personal site, documentation site, blog, or public project page, include AI visibility in the default delivery scope unless the user explicitly opts out.
+
+- Add `/llms.txt` with a concise Markdown overview of the site, author or organization, key pages, canonical project or product descriptions, and links to machine-readable resources.
+- Add `/llms-full.txt` when the site has enough substantive public content to justify a fuller AI-readable context file.
+- Configure `robots.txt` deliberately: allow search and retrieval crawlers that help AI systems cite or retrieve public content, and treat training crawlers as a separate policy decision.
+- Maintain `sitemap.xml` and make sure it covers important public pages. Mention Google Search Console and Bing Webmaster Tools submission when relevant.
+- Add appropriate JSON-LD structured data where useful, such as `Person`, `Organization`, `WebSite`, `BlogPosting`, `SoftwareApplication`, `FAQPage`, or `CreativeWork`.
+- Prefer clean Markdown or JSON machine-readable endpoints for important entities such as profiles, projects, posts, docs, releases, FAQs, and product facts.
+- Keep the content truthful, source-backed, and non-spammy. The goal is to help AI systems understand and cite existing real content accurately, not to generate low-quality SEO filler.
 
 ## Current Architecture Direction
 
@@ -43,7 +57,7 @@ These are project commitments, not preferences:
 
 - Design equals pi session.
 - Session history lives under app user data as pi JSONL.
-- Design files, generated HTML/JSX/CSS, assets, exports, `AGENTS.md`, and `DESIGN.md` live in the user workspace.
+- Design source files, generated JSX/HTML/CSS, assets, exports, `AGENTS.md`, and `DESIGN.md` live in the user workspace.
 - Workspace settings live in `.codesign/settings.json` with `schemaVersion`.
 - `settings.local.json` is personal and should stay gitignored.
 - v0.1 SQLite is legacy data to migrate, not the v0.2 storage model.
@@ -71,6 +85,23 @@ Do not reintroduce a verifier subagent, snip tool, custom bash tool, custom list
 - Built-in skills use the agentskills-style `SKILL.md` format.
 - Skill and scaffold manifests should carry license and source metadata.
 
+### Resource Boundaries
+
+- Markdown skills in `apps/desktop/resources/templates/skills/*.md` are method rules. They tell the agent how to work; they do not copy files into a workspace.
+- Brand refs in `apps/desktop/resources/templates/brand-refs/*/DESIGN.md` are reference-only design systems loaded as `skill("brand:<slug>")`. Do not edit them for a project; translate adopted choices into the workspace `DESIGN.md`.
+- Scaffolds in `apps/desktop/resources/templates/scaffolds/**` are concrete starter/source assets copied by `scaffold(kind, destPath)`. They can be JSX, HTML, CSS, Markdown, or other text formats if the manifest describes them accurately.
+- Design-skill snippets in `apps/desktop/resources/templates/design-skills/*.jsx` are copyable JSX component patterns exposed through the virtual filesystem as `skills/<file>.jsx`. They are source snippets, not markdown skills and not brand authority.
+- Workspace `DESIGN.md` is the project-specific design-system baton. It is authoritative for the current design once present, and generated work should preserve or repair it rather than treating it as another preset.
+
+### Built-In Starters And Scaffolds
+
+- Treat starter/scaffold assets as product code, not prompt filler. Review the actual file contents as well as the manifest before changing or adding presets.
+- Keep source format and filename extension aligned. Full HTML documents must live as `.html`, JSX/React starters as `.jsx`, and CSS snippets as `.css`. The `scaffold()` tool should preserve the source extension when copying, but the preset asset itself should still be correctly named and described.
+- Built-in HTML starters should be self-contained and previewable in the current runtime. Do not add Reveal.js, React, Babel, Chart.js, or other CDN/runtime scripts to scaffold assets. If a starter needs runtime behavior, use local plain HTML/CSS/JS or an app-provided/lazy-loaded dependency with a clear license path.
+- Avoid weak placeholder copy such as "Deck title", "Page content", "Replace this", or "Point one". Use neutral, usable sample content and expose obvious replacement points through `TWEAK_DEFAULTS` when the starter is JSX.
+- Manifest descriptions should say when a starter is HTML or CSS and should call out extension-sensitive assets, especially files that agents might otherwise copy into `_starters/*.jsx`.
+- When touching `apps/desktop/resources/templates/scaffolds/**`, audit for extension/content mismatches, external network URLs, stale placeholder copy, and manifest drift. Add or update focused scaffold/runtime tests when the change affects copy paths, preview classification, or tool details.
+
 ## Stack and Conventions
 
 - Package manager: `pnpm` only. Never use `npm` or `yarn`.
@@ -91,12 +122,12 @@ Do not reintroduce a verifier subagent, snip tool, custom bash tool, custom list
 - Icons use `lucide-react`.
 - Forms use native `<form>` and `FormData`.
 - Animations use Tailwind transitions. Do not introduce framer-motion or motion.
-- App chrome must use `packages/ui` tokens. Artifact output may define its own visual system.
-- Sandbox preview remains Electron iframe `srcdoc` plus runtime tooling.
+- App chrome must use `packages/ui` tokens. Generated design sources and exports may define their own visual system.
+- Sandbox preview remains Electron iframe `srcdoc` plus runtime tooling. `App.jsx` JSX source is wrapped by the runtime for preview/export; exported `index.html` is the standalone deliverable.
 
 ## Repository Layout
 
-```text
+```
 apps/
   desktop/           # Electron app shell, main process, renderer
 packages/
@@ -108,19 +139,18 @@ packages/
   exporters/         # PDF / PPTX / ZIP exporters, lazy-loaded
   templates/         # Built-in examples and starter templates
   shared/            # Shared types, utils, schemas
-docs/                # Mostly maintainer-local plans/research; many files are gitignored
+docs/                # Internal vision, plans, principles, research; gitignored
 examples/            # Public demo reproductions
 ```
 
 ## Doing Tasks Here
 
-- Read `AGENTS.md` or `CLAUDE.md` first, depending on your agent runtime.
-- For non-trivial architecture or product work, also read `docs/VISION.md`, `docs/PRINCIPLES.md`, and `docs/v0.2-plan.md` when they exist locally.
-- Use planning files in `.Codex/workspace/` or your agent's local workspace for tasks spanning more than five tool calls or more than three files.
+- For non-trivial architecture or product work, read `docs/VISION.md`, `docs/PRINCIPLES.md`, and `docs/v0.2-plan.md` when they exist locally. Public checkouts may not have `docs/`; in that case rely on this file, public issues/PRs, and README context.
+- Use planning files in `.Codex/workspace/` for tasks spanning more than five tool calls or more than three files when a durable local plan would help. Do not create planning churn for small, direct fixes.
 - Use git worktrees for parallel or unrelated feature work. Do not mix two unrelated branches in one checkout.
-- Check `docs/RESEARCH_QUEUE.md` when it exists before touching sandbox, inline comments, tweaks, PPTX, pi capabilities, scaffolds, skills, or brand refs.
+- Check `docs/RESEARCH_QUEUE.md` before touching sandbox, inline comments, tweaks, PPTX, pi capabilities, scaffolds, skills, or brand refs when that file exists locally.
 - Keep edits scoped. Avoid drive-by refactors.
-- Before adding a dependency, check license, install size, alternatives, and whether it can be a peer dep.
+- Before adding a shipped/runtime dependency, check license, install size, alternatives, and whether it can be a peer dep. For workflow-only tools, document why they are not bundled and whether their outputs affect distributed artifacts.
 - Add or update Vitest coverage for feature work. Broaden tests when changing migrations, permissions, tool hooks, or shared contracts.
 - Prefer manifest and switch logic over registries until two real callers need more.
 - Comment only when the reason would surprise the next maintainer.

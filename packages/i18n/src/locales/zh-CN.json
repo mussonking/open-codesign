@@ -21,6 +21,10 @@
     "applied": "已应用。",
     "working": "处理中"
   },
+  "ask": {
+    "title": "确认一下",
+    "submit": "回答"
+  },
   "toast": {
     "error": {
       "report": "上报"
@@ -38,10 +42,29 @@
     "tokens": "{{count}} 个 token"
   },
   "canvas": {
+    "previewTab": "预览",
     "filesTab": "文件",
     "filesTabEmpty": "还没有文件",
     "openInTab": "在新标签打开",
     "previewHint": "缩略预览 · 双击文件名或点击「在新标签打开」可在独立标签查看",
+    "documentPreview": {
+      "previewLabel": "文档预览",
+      "loading": "正在准备文档预览…",
+      "unavailable": "暂时无法预览此文档",
+      "empty": "没有提取到可预览的文本内容。",
+      "thumbnailAlt": "{{name}} 预览",
+      "section": {
+        "document": "正文摘录",
+        "workbook": "工作簿摘录"
+      },
+      "stats": {
+        "author": "作者",
+        "pages": "页数",
+        "slides": "幻灯片",
+        "words": "字数",
+        "worksheets": "工作表"
+      }
+    },
     "tabsAriaLabel": "已打开文件",
     "closeTab": "关闭 {{name}}",
     "files": {
@@ -59,7 +82,7 @@
     "workspace": {
       "sectionTitle": "工作区",
       "label": "文件夹",
-      "default": "默认内部存储",
+      "default": "未绑定工作区",
       "choose": "选择文件夹",
       "change": "更改",
       "open": "打开文件夹",
@@ -72,7 +95,60 @@
       "rebindDescription": "此设计已有工作区文件夹。请选择如何继续：",
       "rebindCancel": "取消",
       "rebindSwitchOnly": "仅切换（不复制文件）",
-      "rebindSwitchAndCopy": "切换并复制文件"
+      "rebindSwitchAndCopy": "切换并复制文件",
+      "preview": {
+        "label": "预览",
+        "detect": "检测",
+        "apply": "应用预览 URL",
+        "reload": "重新加载预览",
+        "openConnected": "打开",
+        "openFailed": "无法打开预览",
+        "saveFailed": "无法更新预览",
+        "detectFailed": "无法检测预览",
+        "detectNone": "未找到正在运行的预览",
+        "urlLabel": "预览 URL",
+        "urlPlaceholder": "localhost:5173",
+        "urlRequired": "请先输入本地预览 URL。",
+        "urlInvalid": "请输入有效的 http 或 https URL。",
+        "actions": {
+          "showOptions": "显示预览选项",
+          "hideOptions": "隐藏预览选项"
+        },
+        "status": {
+          "saved": "已保存",
+          "auto": "自动"
+        },
+        "mode": {
+          "label": "模式",
+          "integrated": "集成文件",
+          "integratedShort": "集成",
+          "connectedUrl": "连接 URL",
+          "connectedUrlShort": "连接",
+          "externalApp": "外部应用",
+          "externalAppShort": "外部",
+          "off": "关闭",
+          "offShort": "关闭"
+        },
+        "summary": {
+          "detecting": "正在查找运行中的本地预览。",
+          "integrated": "在 Open CoDesign 内渲染工作区文件。",
+          "integratedBlocked": "此工作区看起来像应用项目；请使用它自己的开发服务器预览。",
+          "connected": "正在预览 {{url}}。",
+          "waitingUrl": "输入正在运行的本地预览 URL。",
+          "external": "使用应用自己的预览窗口。",
+          "externalWithUrl": "外部预览已配置为 {{url}}。",
+          "off": "此工作区的预览已关闭。"
+        },
+        "hint": {
+          "appWorkspace": "应用工作区通常更适合在自己的开发服务器或应用窗口中预览。",
+          "simpleWorkspace": "集成预览会在 Open CoDesign 内渲染 App.jsx 或 index.html。"
+        },
+        "placeholder": {
+          "off": "此工作区的预览已关闭。",
+          "external": "此工作区应在自己的应用窗口或浏览器中预览。",
+          "devServerRequired": "此文件是应用入口。请启动开发服务器，然后使用 Detect 或 Connected URL 预览。"
+        }
+      }
     },
     "rail": {
       "title": "文件",
@@ -104,7 +180,13 @@
     "commentModeHint": "点击任意元素留评",
     "runtimeError": "预览运行时错误",
     "dismissErrors": "关闭预览错误",
-    "zoom": "缩放"
+    "zoom": "缩放",
+    "zoomFit": "适配",
+    "viewport": {
+      "desktop": "桌面预览",
+      "tablet": "平板预览",
+      "mobile": "手机预览"
+    }
   },
   "tweaks": {
     "title": "微调",
@@ -115,6 +197,31 @@
     "swatchAria": "{{key}} 颜色",
     "emptyTitle": "暂无可调 token",
     "emptyHint": "Agent 还没有声明 EDITMODE 区块。下次生成时会自动暴露设计 token。"
+  },
+  "inspector": {
+    "title": "检查器",
+    "close": "关闭检查器",
+    "panels": {
+      "tweaks": "微调",
+      "comments": "评论",
+      "selection": "选中项",
+      "run": "运行"
+    },
+    "empty": {
+      "tweaks": "还没有可微调的预览。",
+      "selection": "在评论模式中选择一个元素即可检查。"
+    },
+    "comments": {
+      "enterMode": "在预览中评论"
+    },
+    "selection": {
+      "target": "目标"
+    },
+    "run": {
+      "status": "状态",
+      "id": "运行 ID",
+      "tokens": "Tokens"
+    }
   },
   "chat": {
     "placeholder": "想设计什么？",
@@ -165,6 +272,34 @@
       },
       "working": {
         "title": "处理中"
+      },
+      "activity": {
+        "working": "处理中",
+        "activity": "活动",
+        "needsAttention": "需要处理",
+        "oneStep": "1 步",
+        "stepCount": "{{count}} 步",
+        "preparingRun": "准备运行",
+        "loadedDesignRules": "已加载设计规则",
+        "loadingDesignRules": "正在加载设计规则",
+        "planProgress": "计划进度",
+        "checkedWorkspace": "已检查工作区",
+        "checkingWorkspace": "正在检查工作区",
+        "workspaceCheckFailed": "工作区检查失败",
+        "titleUpdateFailed": "标题更新失败",
+        "finalCheckFailed": "最终检查失败",
+        "readFile": "已读取文件",
+        "createdFile": "已创建文件",
+        "editedFile": "已编辑文件",
+        "createdAndEdited": "已创建并编辑",
+        "previewing": "正在预览",
+        "previewed": "已预览",
+        "previewFailed": "预览失败",
+        "updatingMemory": "正在更新记忆",
+        "createdMemory": "已创建记忆",
+        "updatedMemory": "已更新记忆",
+        "legacyTool": "旧工具",
+        "genericTool": "工具"
       }
     },
     "comments": {
@@ -177,7 +312,9 @@
     "tabs": {
       "models": "模型",
       "images": "图像 API",
+      "memory": "记忆",
       "appearance": "外观",
+      "workspace": "工作区与文件",
       "storage": "存储",
       "diagnostics": "诊断",
       "advanced": "高级"
@@ -189,6 +326,7 @@
       "hint": "开启后，Agent 在生成设计时可以调用 generate_image_asset 工具。",
       "enabled": "启用图像生成辅助",
       "provider": "服务商",
+      "chatgptSubscription": "ChatGPT 订阅",
       "credentials": "凭据方式",
       "inherit": "沿用模型服务商",
       "customKey": "单独设置 Key",
@@ -201,6 +339,7 @@
       "status": {
         "ready": "可用",
         "needsKey": "缺少 API Key",
+        "needsChatgptLogin": "需要登录 ChatGPT",
         "disabled": "未启用"
       },
       "toast": {
@@ -208,6 +347,29 @@
         "saved": "图像生成设置已保存",
         "saveFailed": "保存图像生成设置失败"
       }
+    },
+    "memory": {
+      "userFile": "用户记忆文件",
+      "open": "打开文件",
+      "updateNow": "立即更新",
+      "enabled": "启用记忆",
+      "enabledHint": "生成时使用工作区 MEMORY.md、全局用户记忆和压缩的 session brief。",
+      "workspaceAutoUpdate": "自动更新工作区记忆",
+      "workspaceAutoUpdateHint": "生成成功后更新 MEMORY.md。",
+      "userAutoUpdate": "自动更新用户记忆",
+      "userAutoUpdateHint": "从候选证据中学习跨工作区设计偏好。默认关闭。",
+      "preview": "用户设计记忆",
+      "save": "保存",
+      "clearCandidates": "清空候选",
+      "loadFailed": "加载记忆失败",
+      "saved": "用户记忆已保存",
+      "saveFailed": "保存记忆失败",
+      "openFailed": "无法打开记忆文件",
+      "updated": "用户记忆已更新",
+      "noCandidates": "暂无待合并候选",
+      "updateFailed": "无法更新用户记忆",
+      "candidatesCleared": "候选已清空",
+      "clearFailed": "无法清空候选"
     },
     "shell": {
       "back": "工作区",
@@ -225,7 +387,7 @@
       "sectionTitle": "API 服务",
       "chatgptLogin": {
         "title": "用 ChatGPT 订阅登录",
-        "description": "直接用你的 ChatGPT Plus / Pro / Team 订阅额度调用 Codex 模型（gpt-5.3-codex 等），无需 API key。",
+        "description": "直接用你的 ChatGPT Plus / Pro / Team 订阅额度调用 Codex 模型（gpt-5.5 等），无需 API key。",
         "signIn": "用 ChatGPT 订阅登录",
         "inProgress": "已打开浏览器，完成授权后自动返回…",
         "loggedInBadge": "已登录 ChatGPT",
@@ -242,6 +404,7 @@
       "empty": "还没有配置任何服务，添加一个即可开始生成。",
       "active": "当前",
       "activeNotInList": "（当前，不在服务返回的列表中）",
+      "noModel": "未选择模型",
       "decryptionFailed": "解密失败",
       "setActive": "设为当前",
       "reEnterKey": "重新输入 Key",
@@ -378,6 +541,7 @@
       "reasoning": {
         "label": "推理深度",
         "default": "默认（自动）",
+        "off": "关闭",
         "minimal": "极低",
         "low": "低",
         "medium": "中",
@@ -397,7 +561,8 @@
       "languageLoadFailed": "加载语言设置失败",
       "langEn": "English",
       "langZhCN": "中文 (简体)",
-      "langPtBR": "Português (BR)"
+      "langPtBR": "Português (BR)",
+      "langEs": "Español"
     },
     "language": {
       "label": "语言",
@@ -416,6 +581,7 @@
       "data": "数据目录",
       "change": "更改",
       "restartHint": "选择 open-codesign 保存配置、日志和本地设计数据的位置。更改会永久保存，重启应用后生效。",
+      "workspaceHint": "设计工作区按单个设计在文件面板中管理。修改这些存储路径不会移动或重新绑定已有工作区文件。",
       "locationSavedToast": "存储位置已保存。重启应用后生效。",
       "locationSaveFailed": "无法保存存储位置",
       "onboardingTitle": "首次引导",
@@ -426,9 +592,12 @@
       "pathsLoadFailed": "加载应用路径失败",
       "openFolderFailed": "无法打开文件夹",
       "onboardingResetToast": "引导已重置，重启应用即可重新运行设置。",
+      "templatesTitle": "模板文件",
+      "templatesHint": "打开脚手架和设计资源使用的内置 starter / template 文件夹。",
       "diagnosticsTitle": "诊断",
       "diagnosticsHint": "打开日志文件夹查看日志，或导出脱敏包用于提交 bug 报告。",
       "openLogFolder": "打开日志文件夹",
+      "openTemplatesFolder": "打开模板文件夹",
       "exportDiagnostics": "导出诊断包",
       "diagnosticsExported": "已导出至 {{path}}",
       "diagnosticsExportFailed": "无法导出诊断包"
@@ -613,7 +782,7 @@
       },
       "pptx": {
         "label": "PPTX",
-        "hint": "可编辑幻灯片；每个 <section> 一页"
+        "hint": "高保真幻灯片；每个 <section> 一页"
       },
       "zip": {
         "label": "ZIP 包",
@@ -768,6 +937,7 @@
     "exporterNotReady": "导出器还在加载，稍等片刻再试。",
     "rendererDisconnected": "渲染进程未连接到主进程。",
     "onboardingIncomplete": "引导流程尚未完成。",
+    "designSystemRequiresOnboarding": "请先完成引导流程，再关联设计系统。",
     "providerMissingKey": "当前 provider「{{provider}}」没有 API key，请打开 Settings 填入。",
     "modelListFailed": "无法加载模型列表。",
     "unknown": "未知错误",
@@ -781,6 +951,7 @@
       "currentLabel": "当前设计",
       "menuLabel": "切换设计",
       "newDesign": "新建设计",
+      "newConversationForWorkspace": "为此工作区新建对话",
       "renameCurrent": "重命名",
       "viewAll": "查看全部设计…",
       "recent": "最近",
@@ -826,6 +997,7 @@
       "switchFailed": "无法切换设计",
       "switchBlockedGenerating": "等当前生成完成后再切换",
       "busyGenerating": "当前生成还没完成，稍等一下再试",
+      "workspaceBusyGenerating": "此工作区已有生成正在运行",
       "renameFailed": "无法重命名设计",
       "duplicated": "已复制为“{{name}}”",
       "duplicateFailed": "无法复制设计",
@@ -852,9 +1024,20 @@
       "timedOut": "请求超时——检查防火墙或 VPN。",
       "corsError": "CORS 跨域错误（主进程中不应出现此错误，这是一个 Bug）。",
       "sslError": "SSL / 证书错误（中转服务使用了自签证书？）。",
+      "endpointNotFound": "Base URL 已包含版本路径，但 Provider 没有暴露这个接口路径。",
       "gatewayIncompatible": "网关接受了连接但没有实现该 Provider 的 API。尝试切换 wire（例如改为 openai-chat）。",
+      "gatewayWafBlocked": "网关或反代在请求到达模型前拦截了生成请求。测试连接可能仍然通过，因为它只探测 /models 端点。",
       "openaiResponsesMisconfigured": "端点拒绝了请求格式。wire 可能配错了——尝试切换到 openai-chat。",
+      "unsupportedRole": "端点拒绝了发送给模型的 role 格式，通常是 wire 或模型策略不兼容。",
+      "reasoningPolicy": "端点拒绝了该模型的 reasoning 元数据。请降低 reasoning 深度后重试。",
+      "modelIdShape": "当前模型 ID 带有这个端点不接受的 Provider 前缀。",
+      "generationTimeout": "生成已达到当前配置的超时时间，但模型还未完成。",
       "relayStreamingBug": "网关可能错误处理了 OpenAI Responses API 的 SSE 事件（老版本 sub2api / claude2api / anyrouter 会把流提前截断）。",
+      "transportInterrupted": "Provider 连接在本轮完成前中断，通常是网关超时或网络中断。",
+      "referenceUrlInvalid": "Reference URL 无效或不受支持。",
+      "referenceUrlFetchFailed": "无法抓取 Reference URL。",
+      "referenceUrlTimeout": "抓取 Reference URL 超时。",
+      "referenceUrlTooLarge": "Reference URL 内容太大，无法纳入上下文。",
       "serverError": "上游服务错误。可能是暂时性的，稍后重试。",
       "unknown": "未知错误——请查看完整日志以获取详情。"
     },
@@ -864,11 +1047,17 @@
       "addCreditsGeneric": "请前往你的 Provider 充值页面",
       "addV1": "添加 /v1",
       "waitAndRetry": "等待后重试",
+      "adjustGenerationTimeout": "调整生成超时时间",
       "checkNetwork": "检查网络 / VPN",
       "checkVpn": "检查 VPN / 防火墙",
       "reportBug": "报告此 Bug",
       "disableTls": "禁用 TLS 验证",
       "switchWire": "到设置页切换 wire",
+      "setReasoningMinimal": "将 reasoning 设为 minimal",
+      "disableReasoning": "关闭 reasoning",
+      "normalizeModelId": "移除模型前缀",
+      "checkReferenceUrl": "检查 Reference URL",
+      "gatewayWafBlocked": "检查代理白名单 / 请求头",
       "relayStreamingBug": "升级中转服务；或把 wire 切到 openai-chat；或改用 api.openai.com"
     },
     "applyFix": "应用此修复",
@@ -1003,14 +1192,14 @@
     }
   },
   "starterPrompts": {
-    "landing": "为一家 AI 创业公司做一个落地页。Hero 区一句有力的 slogan，3 个特性卡片，社会证明区，CTA。编辑风排版，大气留白。",
-    "pitch": "为一家金融科技创业公司生成演讲稿前 3 页：标题页、问题页、解决方案页。16:9 比例，深蓝色调，一个橙色强调色。",
-    "mobile": "设计一个 3 屏的移动端引导流程：欢迎、权限请求、第一个动作。在手机外框里展示，薄荷绿配色。",
-    "dashboard": "做一个数据看板，含 3 张图：条形图（月度销量）、折线图（用户留存）、饼图（渠道细分）。深色主题，真实数据。",
-    "email": "设计一封 SaaS 产品的欢迎邮件。单列 600px 宽，表格布局。含 logo 头部、问候语、三步引导、主 CTA 按钮和页脚。",
-    "portfolio": "设计一个摄影师作品集页面。瀑布流网格布局，用 CSS 渐变做图片占位。深色背景，分类筛选标签，悬浮时显示标题和相机参数。",
-    "casestudy": "做一个 B2B 金融科技的客户案例单页。含客户名 Hero 区、三个大指标（带变化值）、CFO 引言、三步实施流程、合作伙伴 Logo 条。深色主题，衬线标题，等宽数字。",
-    "animation": "做一个展示页，含六个有机风格的 CSS 加载动画。每个在独立卡片里：水滴变形、叶片摇摆、墨滴扩散、呼吸圆环、脉冲波纹、丝带编织。暖奶油色背景，柔和色彩，纯 CSS/SVG。"
+    "landing": "为一家面向小型产品团队的 AI 创业公司设计精致落地页。首屏要有明确产品信号、有力 tagline、subhead、主/次 CTA；下方包含功能区、社会证明、价格预告、FAQ 和页脚。使用编辑风排版、大留白、真实产品文案、响应式布局，不使用外部图库或占位图。",
+    "pitch": "为一家金融科技创业公司生成 16:9 路演稿前 3 页：标题页、问题页、解决方案页。以深蓝为基调，一个橙色强调色，统一页脚和页码，图表或图解用 SVG/CSS 构建，文案要像投资人材料，版面保持导出安全间距。",
+    "mobile": "设计一个 3 屏移动端 onboarding flow，并放在手机外框内：欢迎、权限请求、第一个动作。展示真实 App 文案、进度指示、主/次按钮、权限状态和最后的成功提示。使用柔和薄荷配色、大触控区域、可访问对比度，不使用外部图标或图片。",
+    "dashboard": "为 SaaS 团队做一个数据看板，包含 MRR 趋势折线图、pipeline 堆叠条形图、Top accounts 表格、forecast gauge、日期范围筛选，以及一个空状态或 warning 状态。使用高密度深色主题、teal 和 amber 强调、真实感 mock 数据、可访问表格和响应式卡片重排。",
+    "email": "设计一封 SaaS 产品的事务性欢迎邮件。采用 600px 单列 table-based 布局，包含 logo header、问候语、三步 onboarding、主 CTA、备用文字链接和合规页脚。样式要兼容邮件客户端，移动端安全，文案真实，不使用外部图片或脚本。",
+    "portfolio": "设计一个摄影师作品集页面，用 CSS 渐变或形状占位构成 masonry 图片网格，不使用外部照片。包含 wordmark 导航、分类筛选 pills、hover overlay 展示作品标题和相机参数、lightbox 选中状态、档期页脚、深色背景，并支持两列/三列/四列响应式布局。",
+    "casestudy": "做一个 B2B 金融科技客户案例单页，适合打印。包含客户 Hero、业务背景、三组 before/after 大指标和变化值、CFO 引言、三步 How we did it、流程图和 logo 条。使用深色主题、衬线标题、等宽数字、真实感内容，不要 lorem ipsum。",
+    "animation": "做一个展示页，包含六个有机风格 CSS/SVG 加载动画。每个 loader 放在带标签的卡片里，有使用说明、可访问状态文本、active/paused 状态和动效细节：blob 变形、叶片摇摆、墨滴扩散、呼吸圆环、柔和脉冲、丝带编织。使用暖奶油色背景、柔和色彩、响应式换行，不使用外部资产。"
   },
   "hub": {
     "newDesign": "新建设计",
@@ -1019,9 +1208,9 @@
     "backToHub": "全部设计",
     "tabs": {
       "recent": "最近",
-      "your": "我的设计",
+      "all": "全部设计",
       "examples": "示例",
-      "designSystems": "设计系统"
+      "resources": "资源"
     },
     "recent": {
       "title": "最近",
@@ -1114,6 +1303,10 @@
     "INPUT_EMPTY_HTML": "此操作需要已有的 HTML 内容。",
     "INPUT_UNSUPPORTED_MODE": "不支持该生成模式。",
     "GENERATION_TIMEOUT": "生成超时，请缩短 prompt 或在设置中增加超时时间。",
+    "GENERATION_INCOMPLETE": "Agent 在完成校验前停止了。请继续运行，以完成工作区 artifact。",
+    "WORKSPACE_MISSING": "此设计未绑定工作区，请重新打开或重新创建设计。",
+    "ARTIFACT_PROTOCOL_INVALID": "生成的 artifact 未遵循所需协议。",
+    "TOOL_EXECUTION_FAILED": "设计工具运行失败，详情见日志。",
     "CONFIG_READ_FAILED": "读取配置文件失败，请检查文件权限。",
     "CONFIG_PARSE_FAILED": "配置文件解析失败，可能已损坏。",
     "CONFIG_SCHEMA_INVALID": "配置文件格式不识别，请重新配置。",

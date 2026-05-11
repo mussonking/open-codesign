@@ -1,23 +1,23 @@
 import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import {
+  buildAuthorizeUrl,
   type CallbackServer,
   CodexTokenStore,
-  type StoredCodexAuth,
-  type TokenSet,
-  buildAuthorizeUrl,
   decodeJwtClaims,
   exchangeCode,
   generatePkce,
+  type StoredCodexAuth,
   startCallbackServer,
+  type TokenSet,
 } from '@open-codesign/providers/codex';
 import {
   CHATGPT_CODEX_PROVIDER_ID,
   CodesignError,
   type Config,
   ERROR_CODES,
-  type ProviderEntry,
   hydrateConfig,
+  type ProviderEntry,
 } from '@open-codesign/shared';
 import { configDir, writeConfig } from './config';
 import { ipcMain, shell } from './electron-runtime';
@@ -38,6 +38,16 @@ export interface CodexOAuthStatus {
 // avoid a module cycle with `provider-settings`.
 export { CHATGPT_CODEX_PROVIDER_ID };
 
+const CHATGPT_CODEX_DEFAULT_MODEL = 'gpt-5.5';
+const CHATGPT_CODEX_MODELS = [
+  CHATGPT_CODEX_DEFAULT_MODEL,
+  'gpt-5.4',
+  'gpt-5.4-mini',
+  'gpt-5.3-codex',
+  'gpt-5.3-codex-spark',
+  'gpt-5.2',
+];
+
 const CHATGPT_CODEX_PROVIDER: ProviderEntry = {
   id: CHATGPT_CODEX_PROVIDER_ID,
   name: 'ChatGPT 订阅',
@@ -47,22 +57,11 @@ const CHATGPT_CODEX_PROVIDER: ProviderEntry = {
   // we store the bare base. Do not add `/codex` here — it'd produce
   // `/codex/codex/responses`.
   baseUrl: 'https://chatgpt.com/backend-api',
-  defaultModel: 'gpt-5.3-codex',
-  // Ordered strongest-first by pricing tier / recency, so the UI model
-  // picker surfaces the best choice at the top. `defaultModel` is the
-  // codex-specialized flagship rather than gpt-5.4 because the
-  // codex-trained family produces more reliable artifact output today.
-  modelsHint: [
-    'gpt-5.4',
-    'gpt-5.3-codex',
-    'gpt-5.3-codex-spark',
-    'gpt-5.2-codex',
-    'gpt-5.2',
-    'gpt-5.1-codex-max',
-    'gpt-5.1',
-    'gpt-5.4-mini',
-    'gpt-5.1-codex-mini',
-  ],
+  defaultModel: CHATGPT_CODEX_DEFAULT_MODEL,
+  // Static hint for the keyless ChatGPT/Codex OAuth path. This endpoint has
+  // no usable /models discovery flow, so keep the list aligned with the
+  // official Codex model picker and ordered strongest-first.
+  modelsHint: CHATGPT_CODEX_MODELS,
   requiresApiKey: false,
   capabilities: {
     supportsKeyless: true,
@@ -134,6 +133,7 @@ async function persistProviderMutation(
     secrets: cfg?.secrets ?? {},
     providers: nextProviders,
     ...(cfg?.designSystem !== undefined ? { designSystem: cfg.designSystem } : {}),
+    ...(cfg?.imageGeneration !== undefined ? { imageGeneration: cfg.imageGeneration } : {}),
   });
   await writeConfig(next);
   setCachedConfig(next);
@@ -156,6 +156,7 @@ async function claimActiveProviderIfUnset(): Promise<void> {
     secrets: cfg.secrets,
     providers: cfg.providers,
     ...(cfg.designSystem !== undefined ? { designSystem: cfg.designSystem } : {}),
+    ...(cfg.imageGeneration !== undefined ? { imageGeneration: cfg.imageGeneration } : {}),
   });
   await writeConfig(next);
   setCachedConfig(next);
@@ -254,15 +255,23 @@ async function runCancelLogin(): Promise<boolean> {
 async function runLogout(): Promise<CodexOAuthStatus> {
   await getCodexTokenStore().clear();
   const cfg = getCachedConfig();
-  if (cfg?.providers[CHATGPT_CODEX_PROVIDER_ID] !== undefined) {
-    await persistProviderMutation((providers) => {
-      delete providers[CHATGPT_CODEX_PROVIDER_ID];
-      return providers;
+  if (
+    cfg !== null &&
+    (cfg.providers[CHATGPT_CODEX_PROVIDER_ID] !== undefined ||
+      cfg.activeProvider === CHATGPT_CODEX_PROVIDER_ID)
+  ) {
+    const nextProviders = { ...cfg.providers };
+    delete nextProviders[CHATGPT_CODEX_PROVIDER_ID];
+    const activeWasCodex = cfg.activeProvider === CHATGPT_CODEX_PROVIDER_ID;
+    const next: Config = hydrateConfig({
+      version: 3,
+      activeProvider: activeWasCodex ? '' : cfg.activeProvider,
+      activeModel: activeWasCodex ? '' : cfg.activeModel,
+      secrets: cfg.secrets,
+      providers: nextProviders,
+      ...(cfg.designSystem !== undefined ? { designSystem: cfg.designSystem } : {}),
+      ...(cfg.imageGeneration !== undefined ? { imageGeneration: cfg.imageGeneration } : {}),
     });
-  }
-  const cfgAfter = getCachedConfig();
-  if (cfgAfter !== null && cfgAfter.activeProvider === CHATGPT_CODEX_PROVIDER_ID) {
-    const next: Config = { ...cfgAfter, activeProvider: '', activeModel: '' };
     await writeConfig(next);
     setCachedConfig(next);
   }
@@ -270,31 +279,64 @@ async function runLogout(): Promise<CodexOAuthStatus> {
   return { loggedIn: false, email: null, accountId: null, expiresAt: null };
 }
 
+function sameModelHints(input: string[] | undefined): boolean {
+  return (
+    input !== undefined &&
+    input.length === CHATGPT_CODEX_MODELS.length &&
+    input.every((model, index) => model === CHATGPT_CODEX_MODELS[index])
+  );
+}
+
+function isKnownChatgptCodexModel(modelId: string): boolean {
+  return CHATGPT_CODEX_MODELS.includes(modelId);
+}
+
 /**
  * One-shot boot migration for feat-branch testers: if an older build wrote
  * `chatgpt-codex` with Phase 1's stale `wire`/`baseUrl`, overwrite with the
- * Phase 2 canonical values so the first generate after upgrade works without
- * requiring a manual re-login. No-op when the entry is absent or already
- * canonical. Safe to call on every boot — writes only when state diverges.
+ * current canonical values so the first generate after upgrade works without
+ * requiring a manual re-login. This also refreshes the static model hint list
+ * when ChatGPT subscription model availability changes.
  *
- * Phase 1 released the card in "coming soon" disabled mode, so this migration
- * only fires for users who ran this feat branch directly; zero writes on
- * fresh installs or first-time upgraders from a stock main build.
+ * The public card used to ship disabled, so this migration only fires for
+ * users who ran the experimental branch directly; zero writes on fresh
+ * installs or first-time upgraders from a stock main build.
  */
 export async function migrateStaleCodexEntryIfNeeded(): Promise<void> {
   const cfg = getCachedConfig();
   const entry = cfg?.providers[CHATGPT_CODEX_PROVIDER_ID];
   if (cfg === null || entry === undefined) return;
-  const isStale =
-    entry.wire !== CHATGPT_CODEX_PROVIDER.wire || entry.baseUrl !== CHATGPT_CODEX_PROVIDER.baseUrl;
-  if (!isStale) return;
-  await persistProviderMutation((providers) => {
-    providers[CHATGPT_CODEX_PROVIDER_ID] = { ...CHATGPT_CODEX_PROVIDER };
-    return providers;
+
+  const providerIsStale =
+    entry.wire !== CHATGPT_CODEX_PROVIDER.wire ||
+    entry.baseUrl !== CHATGPT_CODEX_PROVIDER.baseUrl ||
+    entry.defaultModel !== CHATGPT_CODEX_PROVIDER.defaultModel ||
+    !sameModelHints(entry.modelsHint);
+  const activeModelIsStale =
+    cfg.activeProvider === CHATGPT_CODEX_PROVIDER_ID && !isKnownChatgptCodexModel(cfg.activeModel);
+
+  if (!providerIsStale && !activeModelIsStale) return;
+
+  const nextProviders = {
+    ...cfg.providers,
+    [CHATGPT_CODEX_PROVIDER_ID]: { ...CHATGPT_CODEX_PROVIDER },
+  };
+  const next: Config = hydrateConfig({
+    version: 3,
+    activeProvider: cfg.activeProvider,
+    activeModel: activeModelIsStale ? CHATGPT_CODEX_DEFAULT_MODEL : cfg.activeModel,
+    secrets: cfg.secrets,
+    providers: nextProviders,
+    ...(cfg.designSystem !== undefined ? { designSystem: cfg.designSystem } : {}),
+    ...(cfg.imageGeneration !== undefined ? { imageGeneration: cfg.imageGeneration } : {}),
   });
+  await writeConfig(next);
+  setCachedConfig(next);
   logger.info('codex.oauth.migrate.stale_entry_rewritten', {
     previousWire: entry.wire,
     previousBaseUrl: entry.baseUrl,
+    previousDefaultModel: entry.defaultModel,
+    activeModelReset: activeModelIsStale,
   });
 }
 

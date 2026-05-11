@@ -70,32 +70,31 @@ export function LoadingState({ stage: stageProp }: LoadingStateProps = {}) {
   const progress = STAGE_PROGRESS[stage];
 
   return (
-    <div className="h-full p-[var(--space-6)]">
-      <div className="h-full w-full rounded-[var(--radius-2xl)] border border-[var(--color-border)] bg-[var(--color-surface)] overflow-hidden flex flex-col">
-        {/* Skeleton header */}
-        <div className="px-[var(--space-6)] py-[var(--space-5)] border-b border-[var(--color-border-subtle)] space-y-[var(--space-3)]">
-          <div className="shimmer h-4 w-40 rounded-[var(--radius-sm)]" />
-          <div className="shimmer h-3 w-64 rounded-[var(--radius-sm)]" />
-        </div>
-        {/* Skeleton body */}
-        <div className="flex-1 grid grid-cols-3 gap-[var(--space-4)] p-[var(--space-6)]">
-          <div className="shimmer rounded-[var(--radius-lg)]" />
-          <div className="shimmer rounded-[var(--radius-lg)]" />
-          <div className="shimmer rounded-[var(--radius-lg)]" />
-        </div>
-        {/* Stage feedback bar */}
-        <div className="px-[var(--space-6)] py-[var(--space-4)] border-t border-[var(--color-border-subtle)] flex flex-col gap-[var(--space-2)]">
-          <div className="loading-stages flex items-center gap-[var(--space-2)] text-[var(--color-text-secondary)] text-[var(--text-sm)]">
+    <div className="flex h-full items-center justify-center bg-[var(--color-background-secondary)] p-[var(--space-8)]">
+      <div className="w-full max-w-[520px] rounded-[var(--radius-xl)] border border-[var(--color-border-muted)] bg-[var(--color-surface)] px-[var(--space-6)] py-[var(--space-5)] shadow-[var(--shadow-soft)]">
+        <div className="mb-[var(--space-4)] flex items-center gap-[var(--space-3)]">
+          <div className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[var(--color-accent-tint)] text-[var(--color-accent)]">
             <StageIcon stage={activeStage} />
-            <span className="stage-label">{t(`loading.stage.${activeStage}`)}</span>
           </div>
-          {/* Progress indicator — shows completed steps out of 5 visible stages */}
-          <progress
-            value={progress}
-            max={MAX_PROGRESS}
-            aria-label={t(`loading.stage.${activeStage}`)}
-            className="w-full h-1 rounded-full appearance-none [&::-webkit-progress-bar]:rounded-full [&::-webkit-progress-bar]:bg-[var(--color-border)] [&::-webkit-progress-value]:rounded-full [&::-webkit-progress-value]:bg-[var(--color-accent)] transition-all duration-300"
-          />
+          <div className="min-w-0">
+            <div className="truncate text-[var(--text-sm)] font-semibold text-[var(--color-text-primary)]">
+              {t('preview.loading.title')}
+            </div>
+            <div className="mt-[2px] text-[var(--text-xs)] text-[var(--color-text-secondary)]">
+              {t(`loading.stage.${activeStage}`)}
+            </div>
+          </div>
+        </div>
+        <progress
+          value={progress}
+          max={MAX_PROGRESS}
+          aria-label={t(`loading.stage.${activeStage}`)}
+          className="h-1 w-full appearance-none rounded-full [&::-webkit-progress-bar]:rounded-full [&::-webkit-progress-bar]:bg-[var(--color-border-muted)] [&::-webkit-progress-value]:rounded-full [&::-webkit-progress-value]:bg-[var(--color-accent)]"
+        />
+        <div className="mt-[var(--space-3)] text-[11px] leading-[var(--leading-snug)] text-[var(--color-text-muted)]">
+          {t('preview.loading.body', {
+            defaultValue: 'The preview will appear as soon as there is renderable source.',
+          })}
         </div>
       </div>
     </div>

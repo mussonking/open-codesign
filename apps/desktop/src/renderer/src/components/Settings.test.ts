@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-  TIMEOUT_OPTION_SECONDS,
   applyLocaleChange,
   computeModelOptions,
+  primarySettingsTab,
   resolveTimeoutOptions,
+  SETTINGS_TABS,
+  TIMEOUT_OPTION_SECONDS,
 } from './Settings';
 
 vi.mock('@open-codesign/i18n', () => ({
@@ -132,6 +134,29 @@ describe('computeModelOptions', () => {
       { value: 'haiku', label: 'haiku' },
       { value: 'sonnet', label: 'sonnet' },
     ]);
+  });
+});
+
+describe('settings navigation', () => {
+  it('exposes frequently used settings as separate top-level tabs instead of burying them under Advanced', () => {
+    expect(SETTINGS_TABS.map((entry) => entry.id)).toEqual([
+      'models',
+      'images',
+      'appearance',
+      'workspace',
+      'memory',
+      'diagnostics',
+      'advanced',
+    ]);
+  });
+
+  it('opens deep links on their matching primary settings tab', () => {
+    expect(primarySettingsTab('images')).toBe('images');
+    expect(primarySettingsTab('memory')).toBe('memory');
+    expect(primarySettingsTab('diagnostics')).toBe('diagnostics');
+    expect(primarySettingsTab('storage')).toBe('workspace');
+    expect(primarySettingsTab('advanced')).toBe('advanced');
+    expect(primarySettingsTab(null)).toBe('models');
   });
 });
 

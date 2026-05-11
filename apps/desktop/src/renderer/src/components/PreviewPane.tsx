@@ -1,138 +1,56 @@
 import { useT } from '@open-codesign/i18n';
+import { buildPreviewDocument } from '@open-codesign/runtime';
 import {
-  type ElementRectsMessage,
-  type IframeErrorMessage,
-  type OverlayMessage,
-  buildSrcdoc,
-  isElementRectsMessage,
-  isIframeErrorMessage,
-  isOverlayMessage,
-} from '@open-codesign/runtime';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+  type CSSProperties,
+  type DragEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import {
+  clipboardFilesToWorkspaceBlobs,
+  dataTransferFilesToWorkspaceFiles,
+} from '../lib/file-ingest';
 import { EmptyState } from '../preview/EmptyState';
 import { ErrorState } from '../preview/ErrorState';
+import {
+  formatIframeError,
+  handlePreviewMessage,
+  isTrustedPreviewMessageSource,
+  postModeToPreviewWindow,
+  scaleRectForZoom,
+  stablePreviewSourceKey,
+} from '../preview/helpers';
+import { inferPreviewSourcePath } from '../preview/workspace-source';
 import { useCodesignStore } from '../store';
+import type { CanvasTab } from '../store/slices/tabs';
 import { CanvasErrorBar } from './CanvasErrorBar';
 import { CanvasTabBar } from './CanvasTabBar';
+import { CommentBubble } from './comment/CommentBubble';
+import { PinOverlay } from './comment/PinOverlay';
 import { FilesTabView } from './FilesTabView';
 import { PhoneFrame } from './PhoneFrame';
 import { PreviewToolbar } from './PreviewToolbar';
-import { TweakPanel } from './TweakPanel';
-import { CommentBubble } from './comment/CommentBubble';
-import { PinOverlay } from './comment/PinOverlay';
+
+export type {
+  AllowedPreviewMessageType,
+  PreviewMessageHandlers,
+  PreviewMessageOutcome,
+} from '../preview/helpers';
+// Re-export the helpers so App.test.ts / PreviewPane.test.ts keep working.
+export {
+  formatIframeError,
+  handlePreviewMessage,
+  isTrustedPreviewMessageSource,
+  postModeToPreviewWindow,
+  scaleRectForZoom,
+  stablePreviewSourceKey,
+} from '../preview/helpers';
 
 export interface PreviewPaneProps {
   onPickStarter: (prompt: string) => void;
-}
-
-export function formatIframeError(
-  kind: string,
-  message: string,
-  source?: string,
-  lineno?: number,
-): string {
-  const location = source && lineno ? ` (${source}:${lineno})` : '';
-  return `${kind}: ${message}${location}`;
-}
-
-export function isTrustedPreviewMessageSource(
-  source: MessageEventSource | null,
-  previewWindow: Window | null | undefined,
-): boolean {
-  return source !== null && source === previewWindow;
-}
-
-export function postModeToPreviewWindow(
-  win: Window | null | undefined,
-  mode: string,
-  onError: (message: string) => void,
-): boolean {
-  if (!win) return false;
-  try {
-    win.postMessage({ __codesign: true, type: 'SET_MODE', mode }, '*');
-    return true;
-  } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err);
-    onError(`SET_MODE postMessage failed: ${reason}`);
-    return false;
-  }
-}
-
-export function scaleRectForZoom(
-  rect: { top: number; left: number; width: number; height: number },
-  zoomPercent: number,
-): { top: number; left: number; width: number; height: number } {
-  const scale = zoomPercent / 100;
-  return {
-    top: rect.top * scale,
-    left: rect.left * scale,
-    width: rect.width * scale,
-    height: rect.height * scale,
-  };
-}
-
-export function stablePreviewSourceKey(source: string): string {
-  const head = source.trimStart().slice(0, 2048).toLowerCase();
-  // Full HTML documents do not get the JSX tweaks bridge injected, so token
-  // changes must invalidate srcdoc and force a reload to take effect.
-  if (head.startsWith('<!doctype') || head.startsWith('<html')) return source;
-  return source
-    .replace(
-      /\/\*\s*EDITMODE-BEGIN\s*\*\/[\s\S]*?\/\*\s*EDITMODE-END\s*\*\//g,
-      '/*EDITMODE-BEGIN*/__STABLE__/*EDITMODE-END*/',
-    )
-    .replace(
-      /\/\*\s*TWEAK-SCHEMA-BEGIN\s*\*\/[\s\S]*?\/\*\s*TWEAK-SCHEMA-END\s*\*\//g,
-      '/*TWEAK-SCHEMA-BEGIN*/__STABLE__/*TWEAK-SCHEMA-END*/',
-    );
-}
-
-export type AllowedPreviewMessageType = 'ELEMENT_SELECTED' | 'IFRAME_ERROR' | 'ELEMENT_RECTS';
-
-export interface PreviewMessageHandlers {
-  onElementSelected: (msg: OverlayMessage) => void;
-  onIframeError: (msg: IframeErrorMessage) => void;
-  onElementRects: (msg: ElementRectsMessage) => void;
-}
-
-export type PreviewMessageOutcome =
-  | { status: 'handled'; type: AllowedPreviewMessageType }
-  | { status: 'rejected'; reason: 'envelope' | 'unknown-type' | 'shape'; type?: string };
-
-export function handlePreviewMessage(
-  data: unknown,
-  handlers: PreviewMessageHandlers,
-): PreviewMessageOutcome {
-  if (typeof data !== 'object' || data === null) {
-    return { status: 'rejected', reason: 'envelope' };
-  }
-  const envelope = data as { __codesign?: unknown; type?: unknown };
-  if (envelope.__codesign !== true || typeof envelope.type !== 'string') {
-    return { status: 'rejected', reason: 'envelope' };
-  }
-
-  switch (envelope.type) {
-    case 'ELEMENT_SELECTED':
-      if (isOverlayMessage(data)) {
-        handlers.onElementSelected(data);
-        return { status: 'handled', type: 'ELEMENT_SELECTED' };
-      }
-      return { status: 'rejected', reason: 'shape', type: envelope.type };
-    case 'IFRAME_ERROR':
-      if (isIframeErrorMessage(data)) {
-        handlers.onIframeError(data);
-        return { status: 'handled', type: 'IFRAME_ERROR' };
-      }
-      return { status: 'rejected', reason: 'shape', type: envelope.type };
-    case 'ELEMENT_RECTS':
-      if (isElementRectsMessage(data)) {
-        handlers.onElementRects(data);
-        return { status: 'handled', type: 'ELEMENT_RECTS' };
-      }
-      return { status: 'rejected', reason: 'shape', type: envelope.type };
-    default:
-      return { status: 'rejected', reason: 'unknown-type', type: envelope.type };
-  }
 }
 
 const COMMENT_HINT_CLASS =
@@ -140,7 +58,7 @@ const COMMENT_HINT_CLASS =
 
 interface PreviewSlotProps {
   designId: string;
-  html: string;
+  source: string;
   active: boolean;
   viewport: 'mobile' | 'tablet' | 'desktop';
   zoom: number;
@@ -153,6 +71,108 @@ interface PreviewSlotProps {
   onIframeLoaded: (designId: string) => void;
 }
 
+type FramedPreviewViewport = Exclude<PreviewSlotProps['viewport'], 'mobile'>;
+
+const ARTBOARD_FRAME_CLASS =
+  'relative flex-shrink-0 overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-white shadow-[var(--shadow-elevated)] ring-1 ring-[color-mix(in_srgb,var(--color-border)_35%,transparent)]';
+
+const PREVIEW_FRAME_PADDING_PX = 48;
+const PREVIEW_DIMENSIONS = {
+  desktop: { width: 1440, height: 900 },
+  tablet: { width: 768, height: 1024 },
+  mobile: { width: 381, height: 818 },
+} as const satisfies Record<PreviewSlotProps['viewport'], { width: number; height: number }>;
+
+const PREVIEW_PANE_LAYOUT_CLASSES = {
+  root: 'flex min-h-0 min-w-0 flex-1 overflow-hidden',
+  stage: 'flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden',
+  canvasHost: 'relative min-w-0 flex-1 overflow-hidden',
+} as const;
+
+export function previewPaneLayoutClasses(): typeof PREVIEW_PANE_LAYOUT_CLASSES {
+  return PREVIEW_PANE_LAYOUT_CLASSES;
+}
+
+export function isPreviewPaneWelcomeState(input: {
+  activeTab: CanvasTab | undefined;
+  tabCount: number;
+  errorMessage: string | null;
+  previewSource: string | null;
+  designHasContent: boolean;
+}): boolean {
+  const onlyBaseFilesTab = input.tabCount <= 1 && input.activeTab?.kind === 'files';
+  return onlyBaseFilesTab && !input.errorMessage && !input.previewSource && !input.designHasContent;
+}
+
+export function previewViewportDimensions(viewport: PreviewSlotProps['viewport']): {
+  width: number;
+  height: number;
+} {
+  return PREVIEW_DIMENSIONS[viewport];
+}
+
+export function computeFitPreviewZoom(input: {
+  containerWidth: number;
+  containerHeight: number;
+  viewport: PreviewSlotProps['viewport'];
+}): number {
+  if (input.containerWidth <= 0 || input.containerHeight <= 0) return 100;
+  const frame = previewViewportDimensions(input.viewport);
+  const availableWidth = Math.max(1, input.containerWidth - PREVIEW_FRAME_PADDING_PX);
+  const availableHeight = Math.max(1, input.containerHeight - PREVIEW_FRAME_PADDING_PX);
+  const fit = Math.min(availableWidth / frame.width, availableHeight / frame.height) * 100;
+  return Math.min(100, Math.max(25, Math.floor(fit)));
+}
+
+export function previewArtboardStyle(viewport: FramedPreviewViewport): CSSProperties {
+  return viewport === 'tablet'
+    ? {
+        width: 'var(--size-preview-tablet-width)',
+        height: 'var(--size-preview-tablet-height)',
+      }
+    : {
+        width: 'var(--size-preview-desktop-width)',
+        height: 'var(--size-preview-desktop-height)',
+      };
+}
+
+export function previewArtboardFrameClass(): string {
+  return ARTBOARD_FRAME_CLASS;
+}
+
+function ScaledPreviewFrame({
+  viewport,
+  zoom,
+  children,
+}: {
+  viewport: PreviewSlotProps['viewport'];
+  zoom: number;
+  children: React.ReactNode;
+}) {
+  const frame = previewViewportDimensions(viewport);
+  const scale = zoom / 100;
+  return (
+    <div
+      className="relative flex-shrink-0"
+      style={{
+        width: `${frame.width * scale}px`,
+        height: `${frame.height * scale}px`,
+      }}
+    >
+      <div
+        className="origin-top-left"
+        style={{
+          width: `${frame.width}px`,
+          height: `${frame.height}px`,
+          transform: `scale(${scale})`,
+        }}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
 // One iframe per pool entry. Hidden (display:none) when not active, but kept
 // in the DOM so its document — already parsed HTML, executed scripts, laid
 // out — survives design switches. That's the whole point of the pool. The
@@ -160,7 +180,7 @@ interface PreviewSlotProps {
 // don't rebuild the document (~300-500ms blank on JSX cards).
 function PreviewSlot({
   designId,
-  html,
+  source,
   active,
   viewport,
   zoom,
@@ -172,10 +192,13 @@ function PreviewSlot({
   onIframeError,
   onIframeLoaded,
 }: PreviewSlotProps) {
-  const srcDocStableKey = useMemo(() => stablePreviewSourceKey(html), [html]);
+  const srcDocStableKey = useMemo(() => stablePreviewSourceKey(source), [source]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: srcDocStableKey is the intentional dependency. html flows through naturally because the factory closes over it and re-runs whenever the stable key flips, which is exactly when structural changes (anything outside EDITMODE / TWEAK_SCHEMA markers) are present.
-  const srcDoc = useMemo(() => buildSrcdoc(html), [srcDocStableKey]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: srcDocStableKey is the intentional dependency. source flows through naturally because the factory closes over it and re-runs whenever the stable key flips, which is exactly when structural changes (anything outside EDITMODE / TWEAK_SCHEMA markers) are present.
+  const srcDoc = useMemo(
+    () => buildPreviewDocument(source, { path: inferPreviewSourcePath(source) }),
+    [srcDocStableKey],
+  );
 
   const setRef = useCallback(
     (el: HTMLIFrameElement | null) => registerIframe(designId, el),
@@ -183,9 +206,6 @@ function PreviewSlot({
   );
 
   const isMobile = viewport === 'mobile';
-  const scale = zoom / 100;
-  const inversePct = `${10000 / zoom}%`;
-
   const rawIframe = (
     <iframe
       ref={setRef}
@@ -213,55 +233,44 @@ function PreviewSlot({
       }
     />
   );
-  const iframe =
-    zoom === 100 ? (
-      rawIframe
-    ) : (
-      <div
-        className="origin-top-left"
-        style={{ transform: `scale(${scale})`, width: inversePct, height: inversePct }}
-      >
-        {rawIframe}
-      </div>
-    );
-
   let body: React.ReactNode;
   if (isMobile) {
     body = (
-      <div className="min-h-full p-6 flex flex-col items-center justify-center overflow-auto">
-        <div className="relative inline-flex">
-          <PhoneFrame>{iframe}</PhoneFrame>
-          {active ? pinOverlay : null}
-        </div>
+      <div className="codesign-preview-scroll min-h-full p-6 flex flex-col items-center justify-center overflow-auto">
+        <ScaledPreviewFrame viewport="mobile" zoom={zoom}>
+          <div className="relative inline-flex">
+            <PhoneFrame>{rawIframe}</PhoneFrame>
+            {active ? pinOverlay : null}
+          </div>
+        </ScaledPreviewFrame>
       </div>
     );
   } else if (viewport === 'tablet') {
     body = (
-      <div className="h-full p-6 flex flex-col items-center justify-start overflow-auto">
-        <div
-          className="relative"
-          style={{
-            width: 'var(--size-preview-tablet-width)',
-            height: 'var(--size-preview-tablet-height)',
-            flexShrink: 0,
-          }}
-        >
-          {showCommentUi && active ? (
-            <div className={COMMENT_HINT_CLASS}>{commentHintLabel}</div>
-          ) : null}
-          {iframe}
-          {active ? pinOverlay : null}
-        </div>
+      <div className="codesign-preview-scroll h-full p-6 flex flex-col items-center justify-start overflow-auto bg-[var(--color-background-secondary)]">
+        <ScaledPreviewFrame viewport="tablet" zoom={zoom}>
+          <div className={ARTBOARD_FRAME_CLASS} style={previewArtboardStyle('tablet')}>
+            {showCommentUi && active ? (
+              <div className={COMMENT_HINT_CLASS}>{commentHintLabel}</div>
+            ) : null}
+            {rawIframe}
+            {active ? pinOverlay : null}
+          </div>
+        </ScaledPreviewFrame>
       </div>
     );
   } else {
     body = (
-      <div className="h-full w-full relative">
-        {showCommentUi && active ? (
-          <div className={COMMENT_HINT_CLASS}>{commentHintLabel}</div>
-        ) : null}
-        {iframe}
-        {active ? pinOverlay : null}
+      <div className="codesign-preview-scroll h-full p-6 flex items-start justify-center overflow-auto bg-[var(--color-background-secondary)]">
+        <ScaledPreviewFrame viewport="desktop" zoom={zoom}>
+          <div className={ARTBOARD_FRAME_CLASS} style={previewArtboardStyle('desktop')}>
+            {showCommentUi && active ? (
+              <div className={COMMENT_HINT_CLASS}>{commentHintLabel}</div>
+            ) : null}
+            {rawIframe}
+            {active ? pinOverlay : null}
+          </div>
+        </ScaledPreviewFrame>
       </div>
     );
   }
@@ -275,8 +284,8 @@ function PreviewSlot({
 
 export function PreviewPane({ onPickStarter }: PreviewPaneProps) {
   const t = useT();
-  const previewHtml = useCodesignStore((s) => s.previewHtml);
-  const previewHtmlByDesign = useCodesignStore((s) => s.previewHtmlByDesign);
+  const previewSource = useCodesignStore((s) => s.previewSource);
+  const previewSourceByDesign = useCodesignStore((s) => s.previewSourceByDesign);
   const recentDesignIds = useCodesignStore((s) => s.recentDesignIds);
   const currentDesignId = useCodesignStore((s) => s.currentDesignId);
   const designs = useCodesignStore((s) => s.designs);
@@ -285,11 +294,14 @@ export function PreviewPane({ onPickStarter }: PreviewPaneProps) {
   const activeCanvasTab = useCodesignStore((s) => s.activeCanvasTab);
   const errorMessage = useCodesignStore((s) => s.errorMessage);
   const retry = useCodesignStore((s) => s.retryLastPrompt);
+  const importFilesToWorkspace = useCodesignStore((s) => s.importFilesToWorkspace);
   const clearError = useCodesignStore((s) => s.clearError);
   const pushIframeError = useCodesignStore((s) => s.pushIframeError);
   const selectCanvasElement = useCodesignStore((s) => s.selectCanvasElement);
   const previewViewport = useCodesignStore((s) => s.previewViewport);
   const previewZoom = useCodesignStore((s) => s.previewZoom);
+  const previewZoomMode = useCodesignStore((s) => s.previewZoomMode);
+  const setPreviewZoomFit = useCodesignStore((s) => s.setPreviewZoomFit);
   const interactionMode = useCodesignStore((s) => s.interactionMode);
   const comments = useCodesignStore((s) => s.comments);
   const currentSnapshotId = useCodesignStore((s) => s.currentSnapshotId);
@@ -305,6 +317,7 @@ export function PreviewPane({ onPickStarter }: PreviewPaneProps) {
   // window.message guard. We re-point this whenever the active design changes
   // or the active iframe element re-mounts.
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const canvasHostRef = useRef<HTMLDivElement | null>(null);
   // Unsent bubble drafts, keyed by bubbleKey (edit:<id> | new:<selector>).
   // Lives across bubble remounts so switching to another chip / element and
   // coming back restores the text the user had typed. Cleared on successful
@@ -315,6 +328,54 @@ export function PreviewPane({ onPickStarter }: PreviewPaneProps) {
   // the WATCH_SELECTORS effect so we don't race past overlay installation
   // on first mount.
   const [iframeLoadTick, setIframeLoadTick] = useState(0);
+
+  useEffect(() => {
+    if (previewZoomMode !== 'fit') return;
+    const host = canvasHostRef.current;
+    if (!host) return;
+    let scheduled: { kind: 'raf' | 'timeout'; id: number } | null = null;
+
+    const updateFitZoom = () => {
+      const next = computeFitPreviewZoom({
+        containerWidth: host.clientWidth,
+        containerHeight: host.clientHeight,
+        viewport: previewViewport,
+      });
+      if (useCodesignStore.getState().previewZoom !== next) {
+        setPreviewZoomFit(next);
+      }
+    };
+    const scheduleFitZoom = () => {
+      if (scheduled !== null) return;
+      const flush = () => {
+        scheduled = null;
+        updateFitZoom();
+      };
+      if (typeof window.requestAnimationFrame === 'function') {
+        scheduled = { kind: 'raf', id: window.requestAnimationFrame(flush) };
+      } else {
+        scheduled = { kind: 'timeout', id: window.setTimeout(flush, 0) };
+      }
+    };
+    const cancelScheduledFitZoom = () => {
+      if (scheduled === null) return;
+      if (scheduled.kind === 'raf') window.cancelAnimationFrame(scheduled.id);
+      else window.clearTimeout(scheduled.id);
+      scheduled = null;
+    };
+
+    updateFitZoom();
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', updateFitZoom);
+      return () => window.removeEventListener('resize', updateFitZoom);
+    }
+    const observer = new ResizeObserver(scheduleFitZoom);
+    observer.observe(host);
+    return () => {
+      observer.disconnect();
+      cancelScheduledFitZoom();
+    };
+  }, [previewViewport, previewZoomMode, setPreviewZoomFit]);
 
   const registerIframe = useCallback((designId: string, el: HTMLIFrameElement | null) => {
     if (el) {
@@ -417,29 +478,29 @@ export function PreviewPane({ onPickStarter }: PreviewPaneProps) {
   }, [pushIframeError, selectCanvasElement, openCommentBubble, previewZoom, applyLiveRects]);
 
   // Pool entries: active design first (using the freshest in-memory
-  // previewHtml), then any other recently-visited designs that still have a
+  // previewSource), then any other recently-visited designs that still have a
   // cached preview. Store-side LRU bounds the size; we just render what's
   // handed to us.
   const poolEntries = useMemo(() => {
     const seen = new Set<string>();
-    const out: Array<{ id: string; html: string }> = [];
+    const out: Array<{ id: string; source: string }> = [];
     if (currentDesignId !== null) {
-      const html = previewHtml ?? previewHtmlByDesign[currentDesignId];
-      if (typeof html === 'string' && html.length > 0) {
-        out.push({ id: currentDesignId, html });
+      const source = previewSource ?? previewSourceByDesign[currentDesignId];
+      if (typeof source === 'string' && source.length > 0) {
+        out.push({ id: currentDesignId, source });
         seen.add(currentDesignId);
       }
     }
     for (const id of recentDesignIds) {
       if (seen.has(id)) continue;
-      const html = previewHtmlByDesign[id];
-      if (typeof html === 'string' && html.length > 0) {
-        out.push({ id, html });
+      const source = previewSourceByDesign[id];
+      if (typeof source === 'string' && source.length > 0) {
+        out.push({ id, source });
         seen.add(id);
       }
     }
     return out;
-  }, [currentDesignId, previewHtml, previewHtmlByDesign, recentDesignIds]);
+  }, [currentDesignId, previewSource, previewSourceByDesign, recentDesignIds]);
 
   const activeTab = canvasTabs[activeCanvasTab];
   const showCommentUi = interactionMode === 'comment';
@@ -449,7 +510,7 @@ export function PreviewPane({ onPickStarter }: PreviewPaneProps) {
   const pinOverlay = (
     <PinOverlay
       comments={snapshotComments}
-      zoom={previewZoom}
+      zoom={100}
       liveRects={liveRects}
       onPinClick={(c) => {
         const live = liveRects[c.selector] ?? c.rect;
@@ -465,8 +526,24 @@ export function PreviewPane({ onPickStarter }: PreviewPaneProps) {
     />
   );
 
-  const activeHasHtml =
+  const activeHasPreview =
     currentDesignId !== null && poolEntries.some((e) => e.id === currentDesignId);
+
+  async function handleDrop(e: DragEvent<HTMLDivElement>): Promise<void> {
+    const files = dataTransferFilesToWorkspaceFiles(e.dataTransfer);
+    const blobs = files.length === 0 ? await clipboardFilesToWorkspaceBlobs(e.dataTransfer) : null;
+    if (files.length === 0 && (!blobs || (blobs.files.length === 0 && blobs.blobs.length === 0)))
+      return;
+    e.preventDefault();
+    const input = {
+      source: 'canvas',
+      attach: true,
+      ...(files.length > 0 ? { files } : {}),
+      ...(files.length === 0 && blobs?.files.length ? { files: blobs.files } : {}),
+      ...(blobs?.blobs.length ? { blobs: blobs.blobs } : {}),
+    } as const;
+    await importFilesToWorkspace(input);
+  }
 
   // When a design already has persisted content (thumbnail from a prior save,
   // or chat history), the preview IS coming — we're just waiting on the IPC
@@ -484,7 +561,7 @@ export function PreviewPane({ onPickStarter }: PreviewPaneProps) {
   // step (common with token-overflow / validation errors), keep the preview
   // visible — the user can still inspect and tweak what did generate.
   // A small dismissible error banner surfaces via CanvasErrorBar / toast.
-  if (errorMessage && !previewHtml) {
+  if (errorMessage && !previewSource) {
     body = (
       <ErrorState
         message={errorMessage}
@@ -494,8 +571,10 @@ export function PreviewPane({ onPickStarter }: PreviewPaneProps) {
         onDismiss={clearError}
       />
     );
-  } else if (activeTab?.kind === 'files' && previewHtml) {
+  } else if (activeTab?.kind === 'files') {
     body = <FilesTabView />;
+  } else if (activeTab?.kind === 'file') {
+    body = <FilesTabView activePath={activeTab.path} />;
   } else {
     // Pool slots stay mounted even when the current design has no preview —
     // background iframes for recently-visited designs keep their documents
@@ -507,7 +586,7 @@ export function PreviewPane({ onPickStarter }: PreviewPaneProps) {
           <PreviewSlot
             key={entry.id}
             designId={entry.id}
-            html={entry.html}
+            source={entry.source}
             active={entry.id === currentDesignId}
             viewport={previewViewport}
             zoom={previewZoom}
@@ -520,7 +599,7 @@ export function PreviewPane({ onPickStarter }: PreviewPaneProps) {
             onIframeLoaded={handleIframeLoaded}
           />
         ))}
-        {!activeHasHtml ? (
+        {!activeHasPreview ? (
           designHasContent ? (
             <div className="absolute inset-0 flex items-center justify-center bg-[var(--color-background)]">
               <div className="w-[60%] max-w-[720px] aspect-[4/3] rounded-[var(--radius-lg)] bg-[linear-gradient(110deg,var(--color-background-secondary)_0%,rgba(0,0,0,0.03)_40%,var(--color-background-secondary)_80%)] animate-pulse" />
@@ -534,11 +613,17 @@ export function PreviewPane({ onPickStarter }: PreviewPaneProps) {
   }
 
   const hasTabs = canvasTabs.length > 0;
-  const isWelcome = !errorMessage && !previewHtml && !designHasContent;
+  const isWelcome = isPreviewPaneWelcomeState({
+    activeTab,
+    tabCount: canvasTabs.length,
+    errorMessage,
+    previewSource,
+    designHasContent,
+  });
 
   return (
-    <div className="flex min-h-0 flex-1">
-      <div className="flex flex-col min-h-0 flex-1">
+    <div className={PREVIEW_PANE_LAYOUT_CLASSES.root}>
+      <div className={PREVIEW_PANE_LAYOUT_CLASSES.stage}>
         {isWelcome ? null : (
           <div className="flex items-stretch justify-between gap-[var(--space-2)] border-b border-[var(--color-border-muted)] bg-[var(--color-background-secondary)] pl-[var(--space-2)]">
             {hasTabs ? <CanvasTabBar /> : <div />}
@@ -546,9 +631,13 @@ export function PreviewPane({ onPickStarter }: PreviewPaneProps) {
           </div>
         )}
         <CanvasErrorBar />
-        <div className="relative flex-1 overflow-hidden">
+        <div
+          ref={canvasHostRef}
+          className={PREVIEW_PANE_LAYOUT_CLASSES.canvasHost}
+          onDrop={(e) => void handleDrop(e)}
+          onDragOver={(e) => e.preventDefault()}
+        >
           {body}
-          {previewHtml ? <TweakPanel iframeRef={iframeRef} /> : null}
         </div>
         {commentBubble && interactionMode === 'comment'
           ? (() => {

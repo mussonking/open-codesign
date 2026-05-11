@@ -63,7 +63,7 @@ Bolt.new 是基于浏览器的全栈应用构建器，跑在 StackBlitz 的 WebC
 
 ## Open CoDesign 会把我的提示词或设计发给第三方吗？
 
-不会。设计、提示词和扫描结果都存在你本机。v0.1 用 SQLite 存设计历史，TOML 配置文件在 `~/.config/open-codesign/config.toml`，文件权限 0600；v0.2 会把设计迁到 JSONL session 和工作区文件。唯一的对外网络流量就是直接发给你配置的模型提供商，用的是你自己的 API Key。默认零遥测。
+不会。设计、提示词和扫描结果都存在你本机。v0.2 使用 JSONL 保存 design session，并把生成源码放在真实工作区文件里，配置文件在 `~/.config/open-codesign/config.toml`。唯一的对外网络流量就是直接发给你配置的模型提供商，用的是你自己的 API Key。默认零遥测。
 
 ## Open CoDesign 支持哪些 AI 模型？
 
@@ -94,18 +94,15 @@ PDF 导出（依赖本机 Chrome）、PPTX 生成等重型功能首次使用时�
 最快方式：用包管理器。
 
 ```bash
-# Windows
-winget install OpenCoworkAI.OpenCoDesign
-
 # macOS
 brew install --cask opencoworkai/tap/open-codesign
 
-# Windows（备选）
+# Windows
 scoop bucket add opencoworkai https://github.com/OpenCoworkAI/scoop-bucket
-scoop install open-codesign
+scoop install opencoworkai/open-codesign
 ```
 
-或者直接到 [GitHub Releases](https://github.com/OpenCoworkAI/open-codesign/releases) 下载安装包。每个版本都附带 `SHA256SUMS.txt` 和 CycloneDX SBOM 供校验。
+或者直接到 [GitHub Releases](https://github.com/OpenCoworkAI/open-codesign/releases) 下载安装包。每个版本都附带 `SHA256SUMS.txt` 和 CycloneDX SBOM 供校验。winget 包已经提交，正在等 Microsoft review；合并后 `winget install OpenCoworkAI.OpenCoDesign` 才会成为可用的一行命令。
 
 ## Open CoDesign 能离线使用吗？
 
@@ -121,9 +118,9 @@ scoop install open-codesign
 - **Markdown 导出**——带 frontmatter，可被静态站点直接收录。
 - **AI 生成的位图素材**——封面图、背景图、插图、Logo，通过 gpt-image-2 或 OpenRouter 图像模型生成。可选启用，默认关闭。
 
-## v0.2 会带来什么？
+## v0.2 改了什么？
 
-v0.2 是 Agentic Design 大更新，预计一周左右发布。它会把 Open CoDesign 从一次性的提示词转产物生成器，升级成一个本地设计 agent：
+v0.2 是 Agentic Design 大更新。它会把 Open CoDesign 从一次性的提示词转产物生成器，升级成一个本地设计 agent：
 
 - **带真实工作区的 design**——每个 design 都是一个 pi session，历史写入 JSONL，产物落在磁盘文件里
 - **带权限的本地工具**——read、write、edit、bash、grep、find、ls 都会经过 Open CoDesign 的权限 UI
@@ -146,13 +143,13 @@ v0.2 是 Agentic Design 大更新，预计一周左右发布。它会把 Open Co
 - **每个版本带签名 SBOM。** CycloneDX 供应链清单附在每个 GitHub Release 上。
 - **MIT 协议。** 源码自己可审计。
 
-v0.1.x 阶段安装包未签名。Apple Developer ID 公证和 Windows Authenticode 签名将在 v0.5 落地。在那之前，仓库里有每个平台可靠的手动安装说明。
+v0.2.0 安装包仍未签名。Apple Developer ID 公证和 Windows Authenticode 签名将在 v0.5 落地。在那之前，仓库里有每个平台可靠的手动安装说明。
 
 ## 怎么贡献？
 
 - **报 bug**——开 issue 并附复现步骤。
 - **提建议**——用 [GitHub Discussions → Ideas](https://github.com/OpenCoworkAI/open-codesign/discussions/categories/ideas)。
-- **提 PR**——读 [CONTRIBUTING.md](https://github.com/OpenCoworkAI/open-codesign/blob/main/CONTRIBUTING.md)，跑 `pnpm lint && pnpm typecheck && pnpm test`，用户可见改动加 changeset。
+- **提 PR**——读 [CONTRIBUTING.md](https://github.com/OpenCoworkAI/open-codesign/blob/main/CONTRIBUTING.md)。提交带 DCO 签名，跑 `pnpm lint && pnpm typecheck && pnpm test`，加 changeset。
 - **晒成果**——发到 [Show & Tell](https://github.com/OpenCoworkAI/open-codesign/discussions/categories/show-and-tell)。优秀作品会被收录到 release notes。
 
 ## 在哪里求助？

@@ -154,7 +154,7 @@ const secondaryAssets = () => {
           <span class="macos-gatekeeper-copy">{{ copied ? '✓ 已复制' : '复制 / Copy' }}</span>
         </button>
         <p class="macos-gatekeeper-foot">
-          v0.1 未签名 / notarized——开源项目签名成本较高，Stage 2 路线图中。<br/>
+          当前安装包还未签名 / notarized，代码签名在 Stage 2 路线图中。<br/>
           0.1.2 及更早 build 路径是 <code>/Applications/open-codesign.app</code>。
         </p>
       </div>

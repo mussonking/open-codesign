@@ -55,15 +55,26 @@ Full skill body here.
 // ---------------------------------------------------------------------------
 
 describe('loadSkillsFromDir()', () => {
-  it('loads 4 builtin skills from the real builtin directory', async () => {
-    const builtinDir = fileURLToPath(new URL('./builtin', import.meta.url));
+  it('loads builtin skills from the templates/skills bundled resources', async () => {
+    const builtinDir = fileURLToPath(
+      new URL('../../../../apps/desktop/resources/templates/skills', import.meta.url),
+    );
     const skills = await loadSkillsFromDir(builtinDir, 'builtin');
-    expect(skills.length).toBe(4);
+    expect(skills.length).toBeGreaterThanOrEqual(9);
     const ids = skills.map((s) => s.id).sort();
     expect(ids).toContain('frontend-design-anti-slop');
     expect(ids).toContain('pitch-deck');
+    expect(ids).toContain('app-shell-navigation');
+    expect(ids).toContain('accessibility-states');
+    expect(ids).toContain('design-system-baton');
+    expect(ids).toContain('responsive-layout');
     expect(ids).toContain('data-viz-recharts');
     expect(ids).toContain('mobile-mock');
+    expect(ids).toContain('form-layout');
+    expect(ids).toContain('empty-states');
+    expect(ids).toContain('loading-skeleton');
+    expect(ids).toContain('surface-elevation');
+    expect(ids).toContain('cjk-typography');
   });
 
   it('returns empty array when directory does not exist', async () => {
@@ -146,6 +157,25 @@ Body.
     );
     await expect(loadSkillsFromDir(testDir, 'user')).rejects.toSatisfy(
       (err: unknown) => err instanceof CodesignError && err.code === 'SKILL_LOAD_FAILED',
+    );
+  });
+
+  it('throws SKILL_LOAD_FAILED when a skill omits its manifest name', async () => {
+    await writeSkill(
+      testDir,
+      'filename-only.md',
+      `---
+schemaVersion: 1
+description: Filename must not become the skill name.
+---
+Body.
+`,
+    );
+    await expect(loadSkillsFromDir(testDir, 'user')).rejects.toSatisfy(
+      (err: unknown) =>
+        err instanceof CodesignError &&
+        err.code === 'SKILL_LOAD_FAILED' &&
+        err.message.includes('filename-only.md'),
     );
   });
 

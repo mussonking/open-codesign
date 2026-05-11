@@ -20,9 +20,7 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
 
 permissions:
-  contents: write
-  pull-requests: write
-  id-token: write
+  contents: read
 
 jobs:
   # ------------------------------------------------------------------
@@ -37,7 +35,7 @@ jobs:
     env:
       RELEASE_REF: ${{ github.event_name == 'push' && github.ref || format('refs/tags/{0}', inputs.tag) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           ref: ${{ env.RELEASE_REF }}
           fetch-depth: 0
@@ -46,13 +44,31 @@ jobs:
         uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: .nvmrc
           cache: pnpm
 
       - name: Install
-        run: pnpm install --frozen-lockfile
+        run: env -u ELECTRON_SKIP_BINARY_DOWNLOAD -u ELECTRON_SKIP_DOWNLOAD pnpm install --frozen-lockfile --ignore-scripts=false
+
+      - name: Install Electron binary
+        run: |
+          env -u ELECTRON_SKIP_BINARY_DOWNLOAD -u ELECTRON_SKIP_DOWNLOAD pnpm -C apps/desktop exec node -e "
+          const { execFileSync } = require('node:child_process');
+          const path = require('node:path');
+          const electronDir = path.dirname(require.resolve('electron/package.json'));
+          execFileSync(process.execPath, [path.join(electronDir, 'install.js')], { stdio: 'inherit' });
+          "
+
+      - name: Verify Electron binary
+        run: |
+          env -u ELECTRON_SKIP_BINARY_DOWNLOAD -u ELECTRON_SKIP_DOWNLOAD pnpm -C apps/desktop exec node -e "
+          const fs = require('node:fs');
+          const electronPath = require('electron');
+          fs.accessSync(electronPath, fs.constants.X_OK);
+          console.log(electronPath);
+          "
 
       - name: Lint
         run: pnpm lint
@@ -71,12 +87,15 @@ jobs:
     name: Build changelog
     runs-on: ubuntu-latest
     if: github.repository == 'OpenCoworkAI/open-codesign'
+    permissions:
+      contents: read
+      pull-requests: read
     env:
       RELEASE_REF: ${{ github.event_name == 'push' && github.ref || format('refs/tags/{0}', inputs.tag) }}
     outputs:
       changelog: ${{ steps.build.outputs.changelog }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           ref: ${{ env.RELEASE_REF }}
           fetch-depth: 0
@@ -126,29 +145,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # macOS is split into two native-arch runners. Cross-building both
-        # DMGs on a single arm64 host (what we used to do) shipped the host
-        # arch's native module inside the x64 DMG because electron-builder
-        # does not re-stage our per-arch better-sqlite3 prebuilds per target
-        # arch — see #176 (dlopen fails on Intel Macs). Using a native-arch
-        # runner per DMG guarantees `pnpm install` stages the right
-        # better_sqlite3.node* files for each target and keeps the legacy
-        # alias (better_sqlite3.node-electron.node) matching the DMG arch.
+        # macOS artifacts are both produced on the Apple Silicon runner. The
+        # supplemental macos-13 Intel workflow validates native packaging, but
+        # its queue no longer blocks publishing a release.
         include:
           - os: macos-latest # arm64 Apple Silicon runner
-            label: macos-arm64
-            mac_arch: arm64
-            artifact_name: installer-macos-arm64
-            artifact_glob: 'apps/desktop/release/*.dmg'
-          - os: macos-13 # Intel x64 runner (macos-latest is arm64)
-            label: macos-x64
-            mac_arch: x64
-            artifact_name: installer-macos-x64
+            label: macos
+            artifact_name: installer-macos
             artifact_glob: 'apps/desktop/release/*.dmg'
           - os: windows-latest
             label: windows-latest
             artifact_name: installer-windows-latest
-            artifact_glob: 'apps/desktop/release/*.exe'
+            artifact_glob: |
+              apps/desktop/release/*.exe
+              apps/desktop/release/*.zip
           - os: ubuntu-latest
             label: ubuntu-latest
             artifact_name: installer-ubuntu-latest
@@ -160,7 +170,7 @@ jobs:
     env:
       RELEASE_REF: ${{ github.event_name == 'push' && github.ref || format('refs/tags/{0}', inputs.tag) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           ref: ${{ env.RELEASE_REF }}
           fetch-depth: 0
@@ -169,13 +179,31 @@ jobs:
         uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: .nvmrc
           cache: pnpm
 
       - name: Install
-        run: pnpm install --frozen-lockfile
+        run: env -u ELECTRON_SKIP_BINARY_DOWNLOAD -u ELECTRON_SKIP_DOWNLOAD pnpm install --frozen-lockfile --ignore-scripts=false
+
+      - name: Install Electron binary
+        run: |
+          env -u ELECTRON_SKIP_BINARY_DOWNLOAD -u ELECTRON_SKIP_DOWNLOAD pnpm -C apps/desktop exec node -e "
+          const { execFileSync } = require('node:child_process');
+          const path = require('node:path');
+          const electronDir = path.dirname(require.resolve('electron/package.json'));
+          execFileSync(process.execPath, [path.join(electronDir, 'install.js')], { stdio: 'inherit' });
+          "
+
+      - name: Verify Electron binary
+        run: |
+          env -u ELECTRON_SKIP_BINARY_DOWNLOAD -u ELECTRON_SKIP_DOWNLOAD pnpm -C apps/desktop exec node -e "
+          const fs = require('node:fs');
+          const electronPath = require('electron');
+          fs.accessSync(electronPath, fs.constants.X_OK);
+          console.log(electronPath);
+          "
 
       # electron-builder's rpm target shells out to `rpmbuild`, which is not
       # present on ubuntu-latest by default. Install it on Linux runners only.
@@ -190,9 +218,9 @@ jobs:
       # Package the Electron app.
       # CSC_IDENTITY_AUTO_DISCOVERY=false: skip ad-hoc Mac signing prompt.
       # WIN_CSC_LINK / WIN_CSC_KEY_PASSWORD: intentionally unset (no cert in v0.1).
-      # On macOS we force-pin the target arch to the runner's host arch
-      # (--arm64 on macos-latest, --x64 on macos-13) so each DMG is packaged
-      # natively instead of cross-built (see matrix comment + #176).
+      # On macOS we build both arm64 and x64 DMGs on macos-latest, then verify
+      # the packaged Mach-O architecture before upload. This keeps Intel Mac
+      # support automated without depending on the scarce macos-13 queue.
       - name: Package desktop (non-mac)
         if: runner.os != 'macOS'
         env:
@@ -207,10 +235,41 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           pnpm --filter @open-codesign/desktop exec electron-vite build
-          pnpm --filter @open-codesign/desktop exec electron-builder --mac --${{ matrix.mac_arch }} --publish never
+          pnpm --filter @open-codesign/desktop exec bash scripts/package-macos-dmg.sh --mac dmg:arm64 --publish never
+          pnpm --filter @open-codesign/desktop exec bash scripts/package-macos-dmg.sh --mac dmg:x64 --publish never
+
+      - name: Verify macOS app architectures
+        if: runner.os == 'macOS'
+        run: |
+          bash apps/desktop/scripts/verify-macos-app.sh apps/desktop/release arm64
+          bash apps/desktop/scripts/verify-macos-app.sh apps/desktop/release x64
+
+      - name: Smoke x64 app under Rosetta (diagnostic)
+        if: runner.os == 'macOS'
+        env:
+          CODESIGN_SMOKE_TEST: '1'
+          CODESIGN_SMOKE_USER_DATA_DIR: ${{ runner.temp }}/codesign-smoke-x64
+        run: |
+          softwareupdate --install-rosetta --agree-to-license || true
+          rm -rf "$CODESIGN_SMOKE_USER_DATA_DIR"
+          mkdir -p "$CODESIGN_SMOKE_USER_DATA_DIR"
+          x64_binary="$(CODESIGN_VERIFY_PRINT_BINARY=1 bash apps/desktop/scripts/verify-macos-app.sh apps/desktop/release x64)"
+          arch -x86_64 "$x64_binary" --smoke-test &
+          smoke_pid=$!
+          for _ in {1..60}; do
+            if ! kill -0 "$smoke_pid" 2>/dev/null; then
+              wait "$smoke_pid"
+              exit $?
+            fi
+            sleep 1
+          done
+          echo "::warning::x64 smoke test did not exit within 60 seconds under Rosetta"
+          kill "$smoke_pid" 2>/dev/null || true
+          wait "$smoke_pid" 2>/dev/null || true
+          exit 0
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ matrix.artifact_name }}
           path: ${{ matrix.artifact_glob }}
@@ -231,7 +290,7 @@ jobs:
     env:
       RELEASE_REF: ${{ github.event_name == 'push' && github.ref || format('refs/tags/{0}', inputs.tag) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           ref: ${{ env.RELEASE_REF }}
           fetch-depth: 0
@@ -240,13 +299,31 @@ jobs:
         uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: .nvmrc
           cache: pnpm
 
       - name: Install
-        run: pnpm install --frozen-lockfile
+        run: env -u ELECTRON_SKIP_BINARY_DOWNLOAD -u ELECTRON_SKIP_DOWNLOAD pnpm install --frozen-lockfile --ignore-scripts=false
+
+      - name: Install Electron binary
+        run: |
+          env -u ELECTRON_SKIP_BINARY_DOWNLOAD -u ELECTRON_SKIP_DOWNLOAD pnpm -C apps/desktop exec node -e "
+          const { execFileSync } = require('node:child_process');
+          const path = require('node:path');
+          const electronDir = path.dirname(require.resolve('electron/package.json'));
+          execFileSync(process.execPath, [path.join(electronDir, 'install.js')], { stdio: 'inherit' });
+          "
+
+      - name: Verify Electron binary
+        run: |
+          env -u ELECTRON_SKIP_BINARY_DOWNLOAD -u ELECTRON_SKIP_DOWNLOAD pnpm -C apps/desktop exec node -e "
+          const fs = require('node:fs');
+          const electronPath = require('electron');
+          fs.accessSync(electronPath, fs.constants.X_OK);
+          console.log(electronPath);
+          "
 
       - name: Install snapcraft + LXD
         # snapcraft itself handles most simple electron-builder builds via
@@ -270,7 +347,9 @@ jobs:
         run: pnpm exec electron-vite build && pnpm exec electron-builder --linux snap --publish never
 
       - name: Upload snap artifact
-        uses: actions/upload-artifact@v4
+        # Inspection-only artifact: snap packaging is intentionally best-effort
+        # and is not attached to the GitHub Release by publish/provenance.
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: installer-snap
           path: apps/desktop/release/*.snap
@@ -283,12 +362,15 @@ jobs:
   # ------------------------------------------------------------------
   provenance:
     name: Checksums + SBOM
-    needs: [build, build-snap]
+    needs: [build]
     runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
     env:
       RELEASE_REF: ${{ github.event_name == 'push' && github.ref || format('refs/tags/{0}', inputs.tag) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           ref: ${{ env.RELEASE_REF }}
           fetch-depth: 0
@@ -297,7 +379,7 @@ jobs:
         uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: .nvmrc
           cache: pnpm
@@ -306,13 +388,13 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Download all installers
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: dist/
           merge-multiple: true
 
       - name: Generate CycloneDX SBOM (workspace)
-        uses: anchore/sbom-action@v0
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
         with:
           path: .
           format: cyclonedx-json
@@ -330,7 +412,7 @@ jobs:
           cat SHA256SUMS.txt
 
       - name: Upload provenance artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: provenance
           path: |
@@ -344,12 +426,15 @@ jobs:
   # ------------------------------------------------------------------
   publish:
     name: Publish GitHub Release
-    needs: [build, build-snap, changelog, provenance]
+    needs: [build, changelog, provenance]
     runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
     env:
       RELEASE_REF: ${{ github.event_name == 'push' && github.ref || format('refs/tags/{0}', inputs.tag) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           ref: ${{ env.RELEASE_REF }}
           fetch-depth: 0
@@ -368,7 +453,7 @@ jobs:
           fi
 
       - name: Download all installers
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: dist/
           merge-multiple: true
@@ -383,6 +468,7 @@ jobs:
           prerelease: ${{ contains(github.event_name == 'push' && github.ref_name || inputs.tag, '-') }}
           files: dist/**
           fail_on_unmatched_files: false
+          overwrite_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -397,27 +483,28 @@ jobs:
     name: Sync packaging manifests to release
     needs: [publish]
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && !contains(github.ref_name, '-')
+    if: (github.event_name == 'push' && !contains(github.ref_name, '-')) || (github.event_name == 'workflow_dispatch' && inputs.draft == false && !contains(inputs.tag, '-'))
     permissions:
       contents: write
+      pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           # Check out the default branch (not the tag) so the commit lands
           # on main. We pass the version explicitly to the script.
           ref: main
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: Derive version from tag
         id: ver
         run: |
-          version="${GITHUB_REF_NAME#v}"
+          release_ref="${{ github.event_name == 'push' && github.ref_name || inputs.tag }}"
+          version="${release_ref#v}"
+          echo "release_ref=${release_ref}" >> "$GITHUB_OUTPUT"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
 
       - name: Run update-shas.sh
-        env:
-          GITHUB_REF_NAME: ${{ github.ref_name }}
         run: ./packaging/update-shas.sh "${{ steps.ver.outputs.version }}"
 
       - name: Commit + push
@@ -429,11 +516,97 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add packaging/
-          msg="$(printf 'chore(release): sync manifests to %s\n\nAuto-generated by .github/workflows/release.yml after publishing\n%s. Pulls SHA256SUMS.txt from the release and rewrites\ncask / scoop / winget / flatpak manifests to match.\n\n[skip ci]' "$GITHUB_REF_NAME" "$GITHUB_REF_NAME")"
+          release_ref="${{ steps.ver.outputs.release_ref }}"
+          msg="$(printf 'chore(release): sync manifests to %s\n\nAuto-generated by .github/workflows/release.yml after publishing\n%s. Pulls SHA256SUMS.txt from the release and rewrites\ncask / scoop / winget / flatpak manifests to match.\n\n[skip ci]' "$release_ref" "$release_ref")"
           git commit -m "$msg"
           # Rebase in case main advanced while the release job ran.
           git pull --rebase origin main
-          git push origin HEAD:main
+          if git push origin HEAD:main; then
+            echo "::notice::pushed packaging manifest sync directly to main"
+            exit 0
+          fi
+
+          branch="release/${release_ref}-manifests"
+          git push --force origin HEAD:"$branch"
+          existing_pr="$(gh pr list --head "$branch" --json number --jq '.[0].number // empty')"
+          if [ -z "$existing_pr" ]; then
+            gh pr create \
+              --base main \
+              --head "$branch" \
+              --title "chore(release): sync manifests to ${release_ref}" \
+              --body "Auto-generated by .github/workflows/release.yml after publishing ${release_ref}. Pulls SHA256SUMS.txt from the release and rewrites cask / scoop / winget / flatpak manifests to match."
+          fi
+          pr_number="$(gh pr list --head "$branch" --json number --jq '.[0].number')"
+          gh pr merge "$pr_number" --auto --squash
+          echo "::notice::opened packaging manifest PR #${pr_number} and enabled auto-merge"
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+
+  # ------------------------------------------------------------------
+  # Scoop bucket bump — publishes the generated manifest to the actual
+  # OpenCoworkAI/scoop-bucket repo users install from. Scoop consumes the
+  # Windows zip artifacts for new releases, with a legacy NSIS fallback for
+  # releases published before the zip target existed.
+  # ------------------------------------------------------------------
+  scoop:
+    name: Bump Scoop bucket
+    needs: [publish]
+    runs-on: ubuntu-latest
+    if: (github.event_name == 'push' && !contains(github.ref_name, '-')) || (github.event_name == 'workflow_dispatch' && inputs.draft == false && !contains(inputs.tag, '-'))
+    steps:
+      - name: Guard on secret
+        id: guard
+        env:
+          SCOOP_BUCKET_TOKEN: ${{ secrets.SCOOP_BUCKET_TOKEN }}
+        run: |
+          if [ -z "$SCOOP_BUCKET_TOKEN" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::SCOOP_BUCKET_TOKEN not set — skipping Scoop bucket bump. See packaging/README.md."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        if: steps.guard.outputs.skip == 'false'
+
+      - name: Derive version from tag
+        if: steps.guard.outputs.skip == 'false'
+        id: ver
+        run: |
+          release_ref="${{ github.event_name == 'push' && github.ref_name || inputs.tag }}"
+          version="${release_ref#v}"
+          echo "release_ref=${release_ref}" >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate Scoop manifest
+        if: steps.guard.outputs.skip == 'false'
+        env:
+          PACKAGING_CHANNEL: scoop
+        run: ./packaging/update-shas.sh "${{ steps.ver.outputs.version }}"
+
+      - name: Checkout Scoop bucket
+        if: steps.guard.outputs.skip == 'false'
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: OpenCoworkAI/scoop-bucket
+          path: scoop-bucket
+          token: ${{ secrets.SCOOP_BUCKET_TOKEN }}
+
+      - name: Commit + push
+        if: steps.guard.outputs.skip == 'false'
+        run: |
+          mkdir -p scoop-bucket/bucket
+          cp packaging/scoop/bucket/open-codesign.json scoop-bucket/bucket/open-codesign.json
+          cd scoop-bucket
+          if git diff --quiet bucket/open-codesign.json; then
+            echo "::notice::Scoop bucket already up to date — no commit"
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add bucket/open-codesign.json
+          git commit -m "chore: bump open-codesign to ${{ steps.ver.outputs.release_ref }}"
+          git push
 
   # ------------------------------------------------------------------
   # Homebrew Cask bump — opens a PR against OpenCoworkAI/homebrew-tap
@@ -444,7 +617,7 @@ jobs:
     name: Bump Homebrew Cask
     needs: [publish]
     runs-on: macos-latest
-    if: github.event_name == 'push' && !contains(github.ref_name, '-')
+    if: (github.event_name == 'push' && !contains(github.ref_name, '-')) || (github.event_name == 'workflow_dispatch' && inputs.draft == false && !contains(inputs.tag, '-'))
     steps:
       - name: Guard on secret
         id: guard
@@ -456,27 +629,57 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Bump cask
+      - name: Checkout source
         if: steps.guard.outputs.skip == 'false'
-        # TODO: pin to commit SHA when flipping HOMEBREW_TAP_TOKEN on (Scorecard).
-        uses: macauley/action-homebrew-bump-cask@v1
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
+          path: source
+          ref: ${{ github.event_name == 'push' && github.ref || 'main' }}
+
+      - name: Generate cask from release checksums
+        if: steps.guard.outputs.skip == 'false'
+        working-directory: source
+        run: |
+          release_ref="${{ github.event_name == 'push' && github.ref_name || inputs.tag }}"
+          ./packaging/update-shas.sh "${release_ref#v}"
+
+      - name: Checkout Homebrew tap
+        if: steps.guard.outputs.skip == 'false'
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: OpenCoworkAI/homebrew-tap
+          path: homebrew-tap
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          tap: OpenCoworkAI/homebrew-tap
-          cask: open-codesign
-          tag: ${{ github.ref_name }}
-          force: false
+
+      - name: Commit + push cask
+        if: steps.guard.outputs.skip == 'false'
+        run: |
+          mkdir -p homebrew-tap/Casks
+          cp source/packaging/homebrew/Casks/open-codesign.rb homebrew-tap/Casks/open-codesign.rb
+          cd homebrew-tap
+          if git diff --quiet Casks/open-codesign.rb; then
+            echo "::notice::Homebrew tap already up to date — no commit"
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Casks/open-codesign.rb
+          git commit -m "open-codesign ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}"
+          git push
 
   # ------------------------------------------------------------------
-  # winget manifest PR — submits to microsoft/winget-pkgs.
+  # Winget manifest PR — submits to microsoft/winget-pkgs.
   # Skipped until WINGET_PAT is set (see packaging/winget/).
   # Requires initial manual submission of the manifest first.
+  #
+  # This uses a copyleft GitHub Action only as workflow tooling; it is not
+  # bundled, vendored, linked, or distributed with Open CoDesign.
   # ------------------------------------------------------------------
   winget:
     name: Submit winget manifest
     needs: [publish]
     runs-on: windows-latest
-    if: github.event_name == 'push' && !contains(github.ref_name, '-')
+    if: (github.event_name == 'push' && !contains(github.ref_name, '-')) || (github.event_name == 'workflow_dispatch' && inputs.draft == false && !contains(inputs.tag, '-'))
     steps:
       - name: Guard on secret
         id: guard
@@ -489,10 +692,23 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Release winget package
+      - name: Check existing winget package
         if: steps.guard.outputs.skip == 'false'
-        # TODO: pin to commit SHA when flipping WINGET_PAT on (Scorecard).
-        uses: vedantmgoyal9/winget-releaser@v2
+        id: winget-package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'SilentlyContinue'
+          Invoke-RestMethod -Uri 'https://api.github.com/repos/microsoft/winget-pkgs/contents/manifests/o/OpenCoworkAI/OpenCoDesign' -Method Get | Out-Null
+          if ($?) {
+            "exists=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          } else {
+            "exists=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            Write-Output "::notice::OpenCoworkAI.OpenCoDesign is not in microsoft/winget-pkgs yet; skipping automated winget update until the initial manifest is accepted."
+          }
+
+      - name: Release winget package
+        if: steps.guard.outputs.skip == 'false' && steps.winget-package.outputs.exists == 'true'
+        uses: vedantmgoyal9/winget-releaser@4ffc7888bffd451b357355dc214d43bb9f23917e # v2
         with:
           identifier: OpenCoworkAI.OpenCoDesign
           installers-regex: '-x64-setup\.exe$|-arm64-setup\.exe$'

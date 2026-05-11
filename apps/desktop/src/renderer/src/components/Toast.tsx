@@ -1,8 +1,9 @@
 import { useT } from '@open-codesign/i18n';
 import { CheckCircle2, Info, X, XCircle } from 'lucide-react';
 import { useEffect } from 'react';
-import { useCodesignStore } from '../store';
+import { LAYER_CLASS } from '../lib/layers';
 import type { Toast as ToastModel, ToastVariant } from '../store';
+import { useCodesignStore } from '../store';
 
 export function useToast() {
   const push = useCodesignStore((s) => s.pushToast);
@@ -128,7 +129,9 @@ export function ToastViewport() {
   const toasts = useCodesignStore((s) => s.toasts);
   if (toasts.length === 0) return null;
   return (
-    <div className="pointer-events-none fixed bottom-4 right-4 z-[60] flex flex-col gap-2 items-end">
+    <div
+      className={`pointer-events-none fixed bottom-4 left-4 ${LAYER_CLASS.toast} flex flex-col gap-2 items-start`}
+    >
       {toasts.map((t) => (
         <div key={t.id} className="pointer-events-auto">
           <ToastItem toast={t} />

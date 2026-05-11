@@ -4,8 +4,9 @@ Thanks for considering a contribution. This project is in **pre-alpha**: the arc
 
 ## Before you start
 
-- Read [`AGENTS.md`](./AGENTS.md) or [`CLAUDE.md`](./CLAUDE.md) — repository conventions and hard constraints
-- If maintainer-local docs are available, skim `docs/VISION.md` and `docs/PRINCIPLES.md` for product direction
+- Read [`docs/VISION.md`](./docs/VISION.md) — locked product decisions
+- Read [`docs/PRINCIPLES.md`](./docs/PRINCIPLES.md) — CI-enforced engineering constraints
+- Read [`CLAUDE.md`](./CLAUDE.md) — repository conventions
 - Search existing [issues](https://github.com/OpenCoworkAI/open-codesign/issues) and [discussions](https://github.com/OpenCoworkAI/open-codesign/discussions) before opening a new one
 
 ## Filing an issue
@@ -13,7 +14,7 @@ Thanks for considering a contribution. This project is in **pre-alpha**: the arc
 Use our issue templates:
 
 - **[Bug report](https://github.com/OpenCoworkAI/open-codesign/issues/new?template=bug_report.yml)** — reproduction steps, OS/version, and a diagnostics bundle (Settings → Storage → Export diagnostics) speed up triage significantly.
-- **[Feature request](https://github.com/OpenCoworkAI/open-codesign/issues/new?template=feature_request.yml)** — explain the *user problem* before proposing a solution, and confirm the proposal does not conflict with the [hard constraints](./AGENTS.md).
+- **[Feature request](https://github.com/OpenCoworkAI/open-codesign/issues/new?template=feature_request.yml)** — explain the *user problem* before proposing a solution, and confirm the proposal does not conflict with the [hard constraints](./CLAUDE.md).
 
 ## Submitting a PR
 

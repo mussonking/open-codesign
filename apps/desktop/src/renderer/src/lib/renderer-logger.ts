@@ -15,6 +15,38 @@
 
 type LogLevel = 'info' | 'warn' | 'error';
 
+function isLocalDevRenderer(): boolean {
+  try {
+    const location = window.location;
+    return (
+      location?.protocol === 'http:' &&
+      (location.hostname === 'localhost' ||
+        location.hostname === '127.0.0.1' ||
+        location.hostname === '::1')
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isResizeObserverLoopMessage(message: string): boolean {
+  return (
+    message === 'ResizeObserver loop completed with undelivered notifications.' ||
+    message === 'ResizeObserver loop limit exceeded'
+  );
+}
+
+function isViteHotReloadMessage(message: string): boolean {
+  return isLocalDevRenderer() && message.startsWith('[vite] ');
+}
+
+function diagnosticLevelFor(level: LogLevel, scope: string, message: string): LogLevel {
+  if (level !== 'error') return level;
+  if (scope === 'window' && isResizeObserverLoopMessage(message)) return 'warn';
+  if (scope === 'console' && isViteHotReloadMessage(message)) return 'warn';
+  return level;
+}
+
 function forward(
   level: LogLevel,
   scope: string,
@@ -24,9 +56,10 @@ function forward(
 ): void {
   if (!window.codesign?.diagnostics?.log) return;
   try {
+    const forwardedLevel = diagnosticLevelFor(level, scope, message);
     void window.codesign.diagnostics.log({
       schemaVersion: 1,
-      level,
+      level: forwardedLevel,
       scope,
       message,
       ...(extra !== undefined ? { data: extra } : {}),

@@ -1,12 +1,14 @@
 import {
-  type GenerateImageOptions,
   defaultImageBaseUrl,
   defaultImageModel,
+  type GenerateImageOptions,
 } from '@open-codesign/providers';
 import {
+  CHATGPT_CODEX_PROVIDER_ID,
   CodesignError,
   type Config,
   ERROR_CODES,
+  hydrateConfig,
   IMAGE_GENERATION_SCHEMA_VERSION,
   type ImageGenerationCredentialMode,
   ImageGenerationCredentialModeSchema,
@@ -20,8 +22,8 @@ import {
   ImageGenerationSettingsSchema,
   type ImageGenerationSize,
   ImageGenerationSizeSchema,
-  hydrateConfig,
 } from '@open-codesign/shared';
+import { getCodexTokenStore } from './codex-oauth-ipc';
 import { writeConfig } from './config';
 import { ipcMain } from './electron-runtime';
 import { buildSecretRef, decryptSecret } from './keychain';
@@ -44,7 +46,7 @@ export interface ImageGenerationSettingsView {
   inheritedKeyAvailable: boolean;
 }
 
-interface ImageGenerationUpdateInput {
+export interface ImageGenerationUpdateInput {
   enabled?: boolean;
   provider?: ImageGenerationProvider;
   credentialMode?: ImageGenerationCredentialMode;
@@ -54,6 +56,106 @@ interface ImageGenerationUpdateInput {
   size?: ImageGenerationSize;
   outputFormat?: ImageGenerationOutputFormat;
   apiKey?: string;
+}
+
+const IMAGE_GENERATION_UPDATE_FIELDS = [
+  'enabled',
+  'provider',
+  'credentialMode',
+  'model',
+  'baseUrl',
+  'quality',
+  'size',
+  'outputFormat',
+  'apiKey',
+] as const;
+
+function assertKnownFields(
+  record: Record<string, unknown>,
+  allowed: readonly string[],
+  context: string,
+): void {
+  for (const key of Object.keys(record)) {
+    if (!allowed.includes(key)) {
+      throw new CodesignError(
+        `${context} contains unsupported field "${key}"`,
+        ERROR_CODES.IPC_BAD_INPUT,
+      );
+    }
+  }
+}
+
+function parseEnumField<T>(
+  raw: unknown,
+  field: string,
+  schema: { safeParse: (value: unknown) => { success: true; data: T } | { success: false } },
+): T | undefined {
+  if (raw === undefined) return undefined;
+  if (typeof raw !== 'string') {
+    throw new CodesignError(`${field} must be a string`, ERROR_CODES.IPC_BAD_INPUT);
+  }
+  const parsed = schema.safeParse(raw);
+  if (!parsed.success) {
+    throw new CodesignError(`Unsupported ${field}: ${raw}`, ERROR_CODES.IPC_BAD_INPUT);
+  }
+  return parsed.data;
+}
+
+function parseOptionalString(raw: unknown, field: string): string | undefined {
+  if (raw === undefined) return undefined;
+  if (typeof raw !== 'string') {
+    throw new CodesignError(`${field} must be a string`, ERROR_CODES.IPC_BAD_INPUT);
+  }
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) {
+    throw new CodesignError(`${field} must be a non-empty string`, ERROR_CODES.IPC_BAD_INPUT);
+  }
+  return trimmed;
+}
+
+function parseOptionalHttpUrl(raw: unknown, field: string): string | undefined {
+  const value = parseOptionalString(raw, field);
+  if (value === undefined) return undefined;
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new CodesignError(`${field} "${value}" is not a valid URL`, ERROR_CODES.IPC_BAD_INPUT);
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new CodesignError(
+      `${field} must use http(s), got "${parsed.protocol}"`,
+      ERROR_CODES.IPC_BAD_INPUT,
+    );
+  }
+  return value;
+}
+
+function isCredentialAvailabilityMiss(err: unknown): boolean {
+  return (
+    err instanceof CodesignError &&
+    (err.code === ERROR_CODES.CONFIG_MISSING ||
+      err.code === ERROR_CODES.PROVIDER_KEY_MISSING ||
+      err.code === ERROR_CODES.CODEX_TOKEN_NOT_LOGGED_IN)
+  );
+}
+
+async function hasInheritedImageCredential(provider: ImageGenerationProvider): Promise<boolean> {
+  if (provider === CHATGPT_CODEX_PROVIDER_ID) {
+    try {
+      return (await getCodexTokenStore().read()) !== null;
+    } catch (err) {
+      if (isCredentialAvailabilityMiss(err)) return false;
+      throw err;
+    }
+  }
+  try {
+    getApiKeyForProvider(provider);
+    return true;
+  } catch (err) {
+    if (isCredentialAvailabilityMiss(err)) return false;
+    throw err;
+  }
 }
 
 export interface ResolvedImageGenerationConfig {
@@ -79,17 +181,11 @@ export function defaultImageGenerationSettings(): ImageGenerationSettings {
   };
 }
 
-export function imageSettingsToView(
+export async function imageSettingsToView(
   settings: ImageGenerationSettings | undefined,
-): ImageGenerationSettingsView {
+): Promise<ImageGenerationSettingsView> {
   const parsed = ImageGenerationSettingsSchema.parse(settings ?? defaultImageGenerationSettings());
-  let inheritedKeyAvailable = false;
-  try {
-    getApiKeyForProvider(parsed.provider);
-    inheritedKeyAvailable = true;
-  } catch {
-    inheritedKeyAvailable = false;
-  }
+  const inheritedKeyAvailable = await hasInheritedImageCredential(parsed.provider);
   return {
     enabled: parsed.enabled,
     provider: parsed.provider,
@@ -105,32 +201,32 @@ export function imageSettingsToView(
   };
 }
 
-export function resolveImageGenerationConfig(cfg: Config): ResolvedImageGenerationConfig | null {
+export async function resolveImageGenerationConfig(
+  cfg: Config,
+): Promise<ResolvedImageGenerationConfig | null> {
   const settings = cfg.imageGeneration;
   if (settings === undefined) return null;
   if (settings.enabled !== true) return null;
   const parsed = ImageGenerationSettingsSchema.parse(settings);
   let apiKey: string;
-  if (parsed.credentialMode === 'custom') {
+  if (parsed.provider === CHATGPT_CODEX_PROVIDER_ID) {
+    if (parsed.credentialMode === 'custom') {
+      throw new CodesignError(
+        'ChatGPT subscription image generation uses the signed-in ChatGPT account, not a custom API key.',
+        ERROR_CODES.IPC_BAD_INPUT,
+      );
+    }
+    apiKey = await getCodexTokenStore().getValidAccessToken();
+  } else if (parsed.credentialMode === 'custom') {
     if (parsed.apiKey === undefined) {
-      log.warn('resolve.skipped', {
-        reason: 'custom_key_missing',
-        provider: parsed.provider,
-      });
-      return null;
+      throw new CodesignError(
+        `Image generation is enabled but no custom API key is stored for "${parsed.provider}".`,
+        ERROR_CODES.PROVIDER_KEY_MISSING,
+      );
     }
     apiKey = decryptSecret(parsed.apiKey.ciphertext);
   } else {
-    try {
-      apiKey = getApiKeyForProvider(parsed.provider);
-    } catch (err) {
-      log.warn('resolve.skipped', {
-        reason: 'inherit_key_missing',
-        provider: parsed.provider,
-        message: err instanceof Error ? err.message : String(err),
-      });
-      return null;
-    }
+    apiKey = getApiKeyForProvider(parsed.provider);
   }
   const inheritedBaseUrl =
     parsed.credentialMode === 'inherit' ? cfg.providers[parsed.provider]?.baseUrl : undefined;
@@ -150,22 +246,20 @@ export function resolveImageGenerationConfig(cfg: Config): ResolvedImageGenerati
   };
 }
 
-export function isGenerateImageAssetEnabled(cfg: Config): boolean {
-  return resolveImageGenerationConfig(cfg) !== null;
+export async function isGenerateImageAssetEnabled(cfg: Config): Promise<boolean> {
+  return (await resolveImageGenerationConfig(cfg)) !== null;
 }
 
-export function imageGenerationKeyAvailable(cfg: Config | null): boolean {
+export async function imageGenerationKeyAvailable(cfg: Config | null): Promise<boolean> {
   if (cfg === null) return false;
   const settings = cfg.imageGeneration;
   if (settings === undefined) return false;
   const parsed = ImageGenerationSettingsSchema.parse(settings);
-  if (parsed.credentialMode === 'custom') return parsed.apiKey !== undefined;
-  try {
-    getApiKeyForProvider(parsed.provider);
-    return true;
-  } catch {
-    return false;
+  if (parsed.provider === CHATGPT_CODEX_PROVIDER_ID) {
+    return await hasInheritedImageCredential(parsed.provider);
   }
+  if (parsed.credentialMode === 'custom') return parsed.apiKey !== undefined;
+  return await hasInheritedImageCredential(parsed.provider);
 }
 
 export function toGenerateImageOptions(
@@ -206,7 +300,7 @@ export function resolveImageSize(
   return '1024x1536';
 }
 
-function parseUpdate(raw: unknown): ImageGenerationUpdateInput {
+export function parseImageGenerationUpdate(raw: unknown): ImageGenerationUpdateInput {
   if (typeof raw !== 'object' || raw === null) {
     throw new CodesignError(
       'image-generation:v1:update expects an object',
@@ -214,36 +308,46 @@ function parseUpdate(raw: unknown): ImageGenerationUpdateInput {
     );
   }
   const r = raw as Record<string, unknown>;
+  assertKnownFields(r, IMAGE_GENERATION_UPDATE_FIELDS, 'image-generation:v1:update');
   const out: ImageGenerationUpdateInput = {};
-  if (typeof r['enabled'] === 'boolean') out.enabled = r['enabled'];
-  if (typeof r['provider'] === 'string') {
-    out.provider = ImageGenerationProviderSchema.parse(r['provider']);
+  if (r['enabled'] !== undefined) {
+    if (typeof r['enabled'] !== 'boolean') {
+      throw new CodesignError('enabled must be a boolean', ERROR_CODES.IPC_BAD_INPUT);
+    }
+    out.enabled = r['enabled'];
   }
-  if (typeof r['credentialMode'] === 'string') {
-    out.credentialMode = ImageGenerationCredentialModeSchema.parse(r['credentialMode']);
+  const provider = parseEnumField(r['provider'], 'provider', ImageGenerationProviderSchema);
+  if (provider !== undefined) out.provider = provider;
+  const credentialMode = parseEnumField(
+    r['credentialMode'],
+    'credentialMode',
+    ImageGenerationCredentialModeSchema,
+  );
+  if (credentialMode !== undefined) out.credentialMode = credentialMode;
+  const model = parseOptionalString(r['model'], 'model');
+  if (model !== undefined) out.model = model;
+  const baseUrl = parseOptionalHttpUrl(r['baseUrl'], 'baseUrl');
+  if (baseUrl !== undefined) out.baseUrl = baseUrl;
+  const quality = parseEnumField(r['quality'], 'quality', ImageGenerationQualitySchema);
+  if (quality !== undefined) out.quality = quality;
+  const size = parseEnumField(r['size'], 'size', ImageGenerationSizeSchema);
+  if (size !== undefined) out.size = size;
+  const outputFormat = parseEnumField(
+    r['outputFormat'],
+    'outputFormat',
+    ImageGenerationOutputFormatSchema,
+  );
+  if (outputFormat !== undefined) out.outputFormat = outputFormat;
+  if (r['apiKey'] !== undefined) {
+    if (typeof r['apiKey'] !== 'string') {
+      throw new CodesignError('apiKey must be a string', ERROR_CODES.IPC_BAD_INPUT);
+    }
+    out.apiKey = r['apiKey'];
   }
-  if (typeof r['model'] === 'string') {
-    const model = r['model'].trim();
-    if (model.length > 0) out.model = model;
-  }
-  if (typeof r['baseUrl'] === 'string') {
-    const baseUrl = r['baseUrl'].trim();
-    if (baseUrl.length > 0) out.baseUrl = baseUrl;
-  }
-  if (typeof r['quality'] === 'string') {
-    out.quality = ImageGenerationQualitySchema.parse(r['quality']);
-  }
-  if (typeof r['size'] === 'string') {
-    out.size = ImageGenerationSizeSchema.parse(r['size']);
-  }
-  if (typeof r['outputFormat'] === 'string') {
-    out.outputFormat = ImageGenerationOutputFormatSchema.parse(r['outputFormat']);
-  }
-  if (typeof r['apiKey'] === 'string') out.apiKey = r['apiKey'];
   return out;
 }
 
-async function updateImageGenerationSettings(
+export async function updateImageGenerationSettings(
   patch: ImageGenerationUpdateInput,
 ): Promise<ImageGenerationSettingsView> {
   const cfg = getCachedConfig();
@@ -256,14 +360,27 @@ async function updateImageGenerationSettings(
   const { apiKey: apiKeyPatch, ...safePatch } = patch;
   const provider = patch.provider ?? current.provider;
   const providerChanged = patch.provider !== undefined && patch.provider !== current.provider;
+  const credentialMode =
+    provider === CHATGPT_CODEX_PROVIDER_ID
+      ? 'inherit'
+      : (patch.credentialMode ?? current.credentialMode);
   let next: ImageGenerationSettings = {
     ...current,
     ...safePatch,
     provider,
+    credentialMode,
     model: patch.model ?? (providerChanged ? defaultImageModel(provider) : current.model),
   };
   if (patch.baseUrl === undefined && providerChanged) {
     next.baseUrl = defaultImageBaseUrl(provider);
+  }
+  if (providerChanged && apiKeyPatch === undefined && next.apiKey !== undefined) {
+    const { apiKey: _providerScopedKey, ...rest } = next;
+    next = rest;
+  }
+  if (provider === CHATGPT_CODEX_PROVIDER_ID && next.apiKey !== undefined) {
+    const { apiKey: _chatgptDoesNotUseCustomKey, ...rest } = next;
+    next = rest;
   }
   if (apiKeyPatch !== undefined) {
     const trimmed = apiKeyPatch.trim();
@@ -298,7 +415,7 @@ export function registerImageGenerationSettingsIpc(): void {
   ipcMain.handle(
     'image-generation:v1:update',
     async (_e, raw: unknown): Promise<ImageGenerationSettingsView> => {
-      return updateImageGenerationSettings(parseUpdate(raw));
+      return updateImageGenerationSettings(parseImageGenerationUpdate(raw));
     },
   );
 }

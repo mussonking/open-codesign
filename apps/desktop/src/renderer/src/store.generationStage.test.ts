@@ -12,13 +12,74 @@ const READY_CONFIG: OnboardingState = {
 };
 
 const initialState = useCodesignStore.getState();
+const DEFAULT_DESIGN = {
+  schemaVersion: 1 as const,
+  id: 'design-1',
+  name: 'Test design',
+  createdAt: '2024-01-01T00:00:00.000Z',
+  updatedAt: '2024-01-01T00:00:00.000Z',
+  thumbnailText: null,
+  deletedAt: null,
+  workspacePath: '/tmp/open-codesign-stage-test',
+};
+
+function mockChatApi() {
+  return {
+    seedFromSnapshots: vi.fn(async () => {}),
+    list: vi.fn(async () => []),
+    append: vi.fn(async (input: { designId: string; kind: string; payload: unknown }) => ({
+      id: `${input.kind}-1`,
+      designId: input.designId,
+      kind: input.kind,
+      payload: input.payload,
+      createdAt: new Date().toISOString(),
+      seq: 1,
+    })),
+  };
+}
+
+function mockCodesignApi(overrides: Record<string, unknown> = {}) {
+  return {
+    generationStatus: vi.fn(async () => ({ schemaVersion: 1, running: [] })),
+    generate: vi.fn(async () => ({ artifacts: [], message: 'ok' })),
+    chat: mockChatApi(),
+    snapshots: mockSnapshotsApi(),
+    ...overrides,
+  };
+}
+
+function mockSnapshotsApi() {
+  return {
+    list: vi.fn(async () => []),
+    listDesigns: vi.fn(async () => useCodesignStore.getState().designs),
+    setThumbnail: vi.fn(async (id: string, thumbnailText: string | null) => ({
+      ...DEFAULT_DESIGN,
+      id,
+      thumbnailText,
+    })),
+    create: vi.fn(async (input: { designId: string; artifactSource: string }) => ({
+      schemaVersion: 1 as const,
+      id: `snapshot-${input.designId}`,
+      designId: input.designId,
+      parentId: null,
+      type: 'initial' as const,
+      prompt: null,
+      artifactType: 'html' as const,
+      artifactSource: input.artifactSource,
+      createdAt: new Date().toISOString(),
+      message: null,
+    })),
+  };
+}
 
 function resetStore() {
   useCodesignStore.setState({
     ...initialState,
-    previewHtml: null,
+    previewSource: null,
+    generationByDesign: {},
     isGenerating: false,
     activeGenerationId: null,
+    generatingDesignId: null,
     generationStage: 'idle',
     errorMessage: null,
     lastError: null,
@@ -27,6 +88,9 @@ function resetStore() {
     toastMessage: null,
     iframeErrors: [],
     toasts: [],
+    designs: [DEFAULT_DESIGN],
+    designsLoaded: true,
+    currentDesignId: DEFAULT_DESIGN.id,
   });
 }
 
@@ -44,6 +108,51 @@ describe('generationStage transitions', () => {
     expect(useCodesignStore.getState().generationStage).toBe('idle');
   });
 
+  it('hydrates running generation state from the main-process status endpoint', async () => {
+    vi.stubGlobal('window', {
+      codesign: mockCodesignApi({
+        generationStatus: vi.fn(async () => ({
+          schemaVersion: 1,
+          running: [{ designId: DEFAULT_DESIGN.id, generationId: 'gen-main', startedAt: 1234 }],
+        })),
+      }),
+      setTimeout,
+    });
+
+    await useCodesignStore.getState().syncGenerationStatus();
+
+    expect(useCodesignStore.getState().generationByDesign[DEFAULT_DESIGN.id]).toEqual({
+      generationId: 'gen-main',
+      startedAt: 1234,
+      stage: 'thinking',
+    });
+    expect(useCodesignStore.getState().isGenerating).toBe(true);
+    expect(useCodesignStore.getState().generatingDesignId).toBe(DEFAULT_DESIGN.id);
+  });
+
+  it('clears renderer-only generation state when main reports no running generations', async () => {
+    useCodesignStore.setState({
+      generationByDesign: {
+        [DEFAULT_DESIGN.id]: { generationId: 'stale', stage: 'streaming' },
+      },
+      isGenerating: true,
+      activeGenerationId: 'stale',
+      generatingDesignId: DEFAULT_DESIGN.id,
+      generationStage: 'streaming',
+    });
+    vi.stubGlobal('window', {
+      codesign: mockCodesignApi(),
+      setTimeout,
+    });
+
+    await useCodesignStore.getState().syncGenerationStatus();
+
+    expect(useCodesignStore.getState().generationByDesign).toEqual({});
+    expect(useCodesignStore.getState().isGenerating).toBe(false);
+    expect(useCodesignStore.getState().activeGenerationId).toBeNull();
+    expect(useCodesignStore.getState().generatingDesignId).toBeNull();
+  });
+
   it('moves sending → thinking → streaming → parsing → rendering → done on success', async () => {
     const stages: string[] = [];
 
@@ -57,7 +166,7 @@ describe('generationStage transitions', () => {
     );
 
     vi.stubGlobal('window', {
-      codesign: { generate },
+      codesign: { generate, chat: mockChatApi(), snapshots: mockSnapshotsApi() },
       setTimeout,
     });
 
@@ -87,7 +196,7 @@ describe('generationStage transitions', () => {
     const generate = vi.fn(() => Promise.reject(new Error('network fail')));
 
     vi.stubGlobal('window', {
-      codesign: { generate },
+      codesign: { generate, chat: mockChatApi() },
       setTimeout,
     });
 
@@ -110,7 +219,7 @@ describe('generationStage transitions', () => {
     });
 
     vi.stubGlobal('window', {
-      codesign: { generate },
+      codesign: { generate, chat: mockChatApi(), snapshots: mockSnapshotsApi() },
       setTimeout,
     });
 
@@ -148,7 +257,7 @@ describe('generationStage transitions', () => {
   it('does not append artifact_delivered when generate returns assistant text only', async () => {
     useCodesignStore.setState({
       currentDesignId: 'design-1',
-      previewHtml: '<html><body>existing</body></html>',
+      previewSource: '<html><body>existing</body></html>',
     });
 
     const append = vi.fn(async (input: { designId: string; kind: string; payload: unknown }) => ({
@@ -182,7 +291,60 @@ describe('generationStage transitions', () => {
     expect(kinds).toContain('user');
     expect(kinds).toContain('assistant_text');
     expect(kinds).not.toContain('artifact_delivered');
-    expect(useCodesignStore.getState().previewHtml).toBe('<html><body>existing</body></html>');
+    expect(useCodesignStore.getState().previewSource).toBe('<html><body>existing</body></html>');
+    expect(useCodesignStore.getState().generationStage).toBe('done');
+  });
+
+  it('opens and announces a document-first done target even without a preview artifact', async () => {
+    const append = vi.fn(async (input: { designId: string; kind: string; payload: unknown }) => ({
+      id: `${input.kind}-1`,
+      designId: input.designId,
+      kind: input.kind,
+      payload: input.payload,
+      createdAt: new Date().toISOString(),
+      seq: 1,
+    }));
+    const generate = vi.fn(async () => ({
+      artifacts: [],
+      message: 'Created the design brief.',
+      resourceState: {
+        mutationSeq: 1,
+        loadedSkills: [],
+        loadedBrandRefs: [],
+        scaffoldedFiles: [],
+        lastDone: {
+          status: 'ok',
+          path: 'design-brief.md',
+          mutationSeq: 1,
+          errorCount: 0,
+          checkedAt: '2026-05-05T00:00:00.000Z',
+        },
+      },
+    }));
+
+    vi.stubGlobal('window', {
+      codesign: {
+        generate,
+        chat: {
+          seedFromSnapshots: vi.fn(async () => {}),
+          list: vi.fn(async () => []),
+          append,
+        },
+      },
+      setTimeout,
+    });
+
+    await useCodesignStore.getState().sendPrompt({ prompt: '生成一个设计文稿' });
+
+    expect(useCodesignStore.getState().canvasTabs).toContainEqual({
+      kind: 'file',
+      path: 'design-brief.md',
+    });
+    const delivered = append.mock.calls.find(
+      ([input]) => (input as { kind: string }).kind === 'artifact_delivered',
+    )?.[0] as { payload?: { filename?: string } } | undefined;
+    expect(delivered?.payload?.filename).toBe('design-brief.md');
+    expect(useCodesignStore.getState().previewSource).toBeNull();
     expect(useCodesignStore.getState().generationStage).toBe('done');
   });
 });

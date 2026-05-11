@@ -23,15 +23,18 @@ export function HubView({ onUseExamplePrompt }: HubViewProps = {}) {
 
   return (
     <div className="h-full flex flex-col bg-[var(--color-background)] overflow-hidden">
-      <main className="flex-1 min-h-0 overflow-y-auto">
-        <div className="mx-auto max-w-[1600px] px-[var(--space-8)] py-[var(--space-8)]">
+      <main
+        data-codesign-hub-scroll-root
+        className="codesign-scroll-area flex-1 min-h-0 overflow-y-auto"
+      >
+        <div className="mx-auto max-w-[1600px] px-[clamp(var(--space-4),3vw,var(--space-8))] py-[clamp(var(--space-4),3vw,var(--space-8))]">
           {mounted.has('recent') ? (
             <div hidden={hubTab !== 'recent'}>
               <RecentTab />
             </div>
           ) : null}
-          {mounted.has('your') ? (
-            <div hidden={hubTab !== 'your'}>
+          {mounted.has('all') ? (
+            <div hidden={hubTab !== 'all'}>
               <YourDesignsTab />
             </div>
           ) : null}
@@ -40,8 +43,8 @@ export function HubView({ onUseExamplePrompt }: HubViewProps = {}) {
               <ExamplesTab onUsePrompt={(example) => onUseExamplePrompt?.(example.prompt)} />
             </div>
           ) : null}
-          {mounted.has('designSystems') ? (
-            <div hidden={hubTab !== 'designSystems'}>
+          {mounted.has('resources') ? (
+            <div hidden={hubTab !== 'resources'}>
               <DesignSystemsTab />
             </div>
           ) : null}

@@ -1,38 +1,44 @@
-# Device frame starter templates
+# Device Frame Snippets
 
-Vanilla HTML+CSS skeletons that the agent can pull from its virtual
-filesystem when a design needs accurate device chrome. Each file is
-fully self-contained (no JS, no external CSS, no React) so it works
-inside the iframe `srcdoc` sandbox renderer.
+Device frames are JSX runtime snippets that the desktop host seeds into the
+agent virtual filesystem as `frames/<name>.jsx`.
 
-## Available frames
+They are different from scaffold presets:
 
-- `iphone.html` — iPhone 16 Pro (402x874, dynamic island, home indicator)
-- `ipad.html` — iPad (820x1180, slim status bar, no island)
-- `watch.html` — Apple Watch Ultra (200x244, digital crown + side button)
+- Frames are read with `view("frames/iphone.jsx")` and adapted into `App.jsx`.
+- Scaffolds are copied into the workspace with `scaffold(kind, destPath)`.
+- Workspace `DESIGN.md` remains the design-system baton; frames are only visual
+  chrome helpers.
 
-## How the agent uses them
+## Available Frames
 
-The host (`apps/desktop/src/main/index.ts`) seeds the agent's virtual
-filesystem with `frames/iphone.html`, `frames/ipad.html`, etc. The
-system prompt mentions only that these frames exist; the model decides
-whether the design benefits from device chrome and `view`s the
-relevant frame on its own. There is no keyword detection in either the
-main process or the prompt.
+- `iphone.jsx` - iPhone frame.
+- `ipad.jsx` - iPad frame.
+- `watch.jsx` - watch frame.
+- `android.jsx` - Android phone frame.
+- `macos-safari.jsx` - macOS Safari window frame.
 
-If the model picks a frame, it copies the skeleton into `index.html`
-and inserts its app HTML inside the `<div id="screen">` container.
+## How The Agent Uses Them
 
-## Adding a new frame
+The host loads files from `<userData>/templates/frames/` and exposes them under
+`frames/` in the virtual filesystem. The agent may view a frame when the brief
+explicitly benefits from device or browser chrome, then copy the relevant
+component structure into `App.jsx`.
 
-1. Drop `<name>.html` in this directory.
-2. Append the filename to the `FRAME_FILES` tuple in `index.ts`.
-3. The frame becomes available at `frames/<name>` in the agent's fs.
+Frames should not be final artifacts by themselves. The agent still needs to
+adapt the screen content, tokens, interactions, accessibility, and any
+`DESIGN.md` baton.
+
+## Adding A New Frame
+
+1. Drop `<name>.jsx` in `apps/desktop/resources/templates/frames/`.
+2. Append the filename to `FRAME_FILES` in `packages/core/src/frames/index.ts`.
+3. Keep `TWEAK_DEFAULTS` valid JSON when the frame has tweakable values.
+4. Add focused tests if the loader contract or virtual path changes.
 
 Conventions:
 
-- Self-contained (`<style>` inline, no external resources).
-- Empty `<div id="screen">` placeholder where the user's app HTML goes.
-- Expose tunable colors via `:root` CSS variables (`--screen-bg`,
-  `--text`, etc.) so the agent can theme without touching the chrome.
-- Comment the frame with what overrides are safe.
+- JSX source compatible with the preview runtime.
+- No external network assets or CDN scripts.
+- Stable outer dimensions and clear inner screen/content region.
+- Tunable values exposed through `TWEAK_DEFAULTS` only when useful.

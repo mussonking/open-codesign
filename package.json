@@ -1,6 +1,6 @@
 {
   "name": "open-codesign",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "private": true,
   "description": "Open-source AI design tool — prompt to interactive prototype, slide deck, and marketing assets. Multi-model, BYOK, runs on your laptop.",
   "license": "MIT",
@@ -15,7 +15,7 @@
   "engines": {
     "node": ">=22"
   },
-  "packageManager": "pnpm@9.15.0",
+  "packageManager": "pnpm@10.33.4",
   "scripts": {
     "prepare": "husky",
     "build": "turbo run build",
@@ -34,10 +34,15 @@
     "release": "turbo run build && changeset publish"
   },
   "pnpm": {
-    "neverBuiltDependencies": ["better-sqlite3"]
+    "overrides": {
+      "@xmldom/xmldom@<0.8.13": "0.8.13",
+      "fast-xml-parser@<5.7.0": ">=5.7.0",
+      "vitepress>vite": "6.4.2",
+      "esbuild@<0.25.0": ">=0.25.0"
+    }
   },
   "devDependencies": {
-    "@biomejs/biome": "^1.9.4",
+    "@biomejs/biome": "^2.4.14",
     "@changesets/cli": "^2.27.11",
     "@iarna/toml": "^2.2.5",
     "@open-codesign/core": "workspace:*",
@@ -46,7 +51,7 @@
     "acorn": "^8.14.0",
     "husky": "^9.1.7",
     "tsx": "^4.19.2",
-    "turbo": "^2.3.3",
-    "typescript": "^5.7.2"
+    "turbo": "^2.9.9",
+    "typescript": "^6.0.3"
   }
 }

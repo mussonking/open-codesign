@@ -1,6 +1,6 @@
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CodesignError } from '@open-codesign/shared';
+import { CodesignError, ERROR_CODES } from '@open-codesign/shared';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Mock electron and logger before importing the module under test.
@@ -51,9 +51,12 @@ describe('readPersisted()', () => {
     expect(result).toEqual({
       updateChannel: 'stable',
       generationTimeoutSec: 1200,
-      checkForUpdatesOnStartup: true,
+      checkForUpdatesOnStartup: false,
       dismissedUpdateVersion: '',
       diagnosticsLastReadTs: 0,
+      memoryEnabled: true,
+      workspaceMemoryAutoUpdate: true,
+      userMemoryAutoUpdate: false,
     });
   });
 
@@ -75,7 +78,7 @@ describe('readPersisted()', () => {
     }
   });
 
-  it('throws CodesignError with PREFERENCES_READ_FAILED on a non-ENOENT error (e.g. EACCES)', async () => {
+  it('throws CodesignError with PREFERENCES_READ_FAIL on a non-ENOENT error (e.g. EACCES)', async () => {
     const permissionDenied = Object.assign(new Error('permission denied'), { code: 'EACCES' });
     readFileMock.mockRejectedValueOnce(permissionDenied);
 
@@ -83,7 +86,38 @@ describe('readPersisted()', () => {
 
     readFileMock.mockRejectedValueOnce(permissionDenied);
     const err = await readPersisted().catch((e: unknown) => e);
-    expect((err as CodesignError).code).toBe('PREFERENCES_READ_FAILED');
+    expect((err as CodesignError).code).toBe(ERROR_CODES.PREFERENCES_READ_FAIL);
+  });
+
+  it('throws when persisted preferences are not valid JSON', async () => {
+    readFileMock.mockResolvedValueOnce('{"generationTimeoutSec":');
+
+    await expect(readPersisted()).rejects.toMatchObject({
+      code: ERROR_CODES.PREFERENCES_READ_FAIL,
+    });
+  });
+
+  it('throws when persisted preferences contain malformed present fields', async () => {
+    readFileMock.mockResolvedValueOnce(
+      JSON.stringify({ schemaVersion: 5, generationTimeoutSec: '1200' }),
+    );
+
+    await expect(readPersisted()).rejects.toMatchObject({
+      code: ERROR_CODES.PREFERENCES_READ_FAIL,
+      message: expect.stringContaining('generationTimeoutSec'),
+    });
+  });
+
+  it('ignores unknown fields in persisted preferences from stale local builds', async () => {
+    readFileMock.mockResolvedValueOnce(
+      JSON.stringify({
+        schemaVersion: 8,
+        generationTimeoutSec: 900,
+        localWorkspaceDefaultMode: 'work-on-project',
+      }),
+    );
+
+    await expect(readPersisted()).resolves.toMatchObject({ generationTimeoutSec: 900 });
   });
 
   it('migrates schemaVersion 1 with legacy 120s timeout to the 1200s default', async () => {
@@ -198,19 +232,20 @@ describe('readPersisted()', () => {
       schemaVersion: number;
       diagnosticsLastReadTs: number;
     };
-    expect(written.schemaVersion).toBe(5);
+    expect(written.schemaVersion).toBe(8);
     expect(written.diagnosticsLastReadTs).toBe(result.diagnosticsLastReadTs);
     expect(written.diagnosticsLastReadTs).toBeGreaterThanOrEqual(before);
     expect(written.diagnosticsLastReadTs).toBeLessThanOrEqual(after);
   });
 });
 
-describe('preferences v4 schema fields', () => {
+describe('preferences memory schema fields', () => {
   // Capture ipcMain.handle calls so we can invoke registered handlers directly.
   // biome-ignore lint/suspicious/noExplicitAny: test helper
   const handlers: Record<string, (...args: any[]) => unknown> = {};
 
   beforeEach(async () => {
+    for (const key of Object.keys(handlers)) delete handlers[key];
     const { ipcMain } = await import('electron');
     vi.mocked(ipcMain.handle).mockImplementation((channel, handler) => {
       handlers[channel] = handler;
@@ -224,8 +259,28 @@ describe('preferences v4 schema fields', () => {
       JSON.stringify({ schemaVersion: 3, updateChannel: 'stable', generationTimeoutSec: 1200 }),
     );
     const prefs = await readPersisted();
-    expect(prefs.checkForUpdatesOnStartup).toBe(true);
+    expect(prefs.checkForUpdatesOnStartup).toBe(false);
     expect(prefs.dismissedUpdateVersion).toBe('');
+  });
+
+  it('does not register unversioned preferences channels', () => {
+    expect(handlers['preferences:v1:get']).toBeDefined();
+    expect(handlers['preferences:v1:update']).toBeDefined();
+    expect(handlers['preferences:get']).toBeUndefined();
+    expect(handlers['preferences:update']).toBeUndefined();
+  });
+
+  it('rejects unknown update fields instead of dropping them', async () => {
+    const readCalls = readFileMock.mock.calls.length;
+    const writeCalls = writeFileMock.mock.calls.length;
+    await expect(
+      (handlers['preferences:v1:update'] as (_e: null, raw: unknown) => Promise<unknown>)(null, {
+        dismissedUpdateVersion: '0.2.1',
+        accidentalField: true,
+      }),
+    ).rejects.toThrow(/unsupported field/);
+    expect(readFileMock).toHaveBeenCalledTimes(readCalls);
+    expect(writeFileMock).toHaveBeenCalledTimes(writeCalls);
   });
 
   it('round-trips dismissedUpdateVersion through preferences:v1:update', async () => {
@@ -249,5 +304,57 @@ describe('preferences v4 schema fields', () => {
     if (!lastCall) throw new Error('writeFile was not called');
     const written = JSON.parse(lastCall[1] as string) as { dismissedUpdateVersion: string };
     expect(written.dismissedUpdateVersion).toBe('0.2.1');
+  });
+
+  it('defaults memory on, keeps workspace updates on, and keeps user learning off', async () => {
+    readFileMock.mockResolvedValueOnce(
+      JSON.stringify({
+        schemaVersion: 5,
+        updateChannel: 'stable',
+        generationTimeoutSec: 1200,
+        checkForUpdatesOnStartup: true,
+        dismissedUpdateVersion: '',
+        diagnosticsLastReadTs: 1,
+      }),
+    );
+    const prefs = await readPersisted();
+    expect(prefs.memoryEnabled).toBe(true);
+    expect(prefs.workspaceMemoryAutoUpdate).toBe(true);
+    expect(prefs.userMemoryAutoUpdate).toBe(false);
+
+    readFileMock.mockResolvedValueOnce(
+      JSON.stringify({
+        schemaVersion: 6,
+        updateChannel: 'stable',
+        generationTimeoutSec: 1200,
+        checkForUpdatesOnStartup: true,
+        dismissedUpdateVersion: '',
+        diagnosticsLastReadTs: 1,
+        memoryEnabled: true,
+        workspaceMemoryAutoUpdate: true,
+        userMemoryAutoUpdate: false,
+      }),
+    );
+    const updated = await (
+      handlers['preferences:v1:update'] as (_e: null, raw: unknown) => Promise<unknown>
+    )(null, { memoryEnabled: false, workspaceMemoryAutoUpdate: false, userMemoryAutoUpdate: true });
+
+    expect(updated).toMatchObject({
+      memoryEnabled: false,
+      workspaceMemoryAutoUpdate: false,
+      userMemoryAutoUpdate: true,
+    });
+    const lastCall = writeFileMock.mock.calls.at(-1);
+    if (!lastCall) throw new Error('writeFile was not called');
+    const written = JSON.parse(lastCall[1] as string) as {
+      schemaVersion: number;
+      memoryEnabled: boolean;
+      workspaceMemoryAutoUpdate: boolean;
+      userMemoryAutoUpdate: boolean;
+    };
+    expect(written.schemaVersion).toBe(8);
+    expect(written.memoryEnabled).toBe(false);
+    expect(written.workspaceMemoryAutoUpdate).toBe(false);
+    expect(written.userMemoryAutoUpdate).toBe(true);
   });
 });

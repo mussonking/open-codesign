@@ -1,23 +1,26 @@
 {
   "name": "@open-codesign/shared",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./fingerprint": "./src/fingerprint.ts"
+    "./design-md": "./src/design-md.ts",
+    "./fingerprint": "./src/fingerprint.ts",
+    "./html-utils": "./src/html-utils.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "zod": "^3.24.1"
+    "yaml": "2.8.4",
+    "zod": "^4.4.2"
   },
   "devDependencies": {
-    "typescript": "^5.7.2",
-    "vitest": "^2.1.8"
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.5"
   }
 }

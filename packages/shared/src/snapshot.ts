@@ -23,8 +23,13 @@ export const DesignV1 = z.object({
   thumbnailText: z.string().nullable().default(null),
   deletedAt: z.string().nullable().default(null),
   workspacePath: z.string().nullable().default(null),
+  workspaceMode: z.enum(['blank-canvas', 'work-on-project']).optional(),
+  previewMode: z.enum(['managed-file', 'connected-url', 'external-app', 'none']).optional(),
+  previewUrl: z.string().nullable().optional(),
 });
 export type Design = z.infer<typeof DesignV1>;
+export type WorkspaceMode = NonNullable<Design['workspaceMode']>;
+export type PreviewMode = NonNullable<Design['previewMode']>;
 
 export const DesignMessageV1 = z.object({
   schemaVersion: z.literal(1).default(1),
@@ -46,10 +51,9 @@ export const ChatMessageKind = z.enum([
 export type ChatMessageKind = z.infer<typeof ChatMessageKind>;
 
 /**
- * Row from the chat_messages table. `payload` is a JSON string on disk; the
- * typed variants are parsed at the IPC boundary. Schema must anticipate
- * Phase 2 tool events (tool_call with verbGroup) even though Phase 1 only
- * emits user / assistant_text / artifact_delivered.
+ * Row replayed from the per-design session JSONL. The schema accepts streamed
+ * agent tool events (`tool_call` with `verbGroup`) alongside durable chat rows
+ * for user text, assistant text, artifacts, and errors.
  */
 export const ChatMessageRowV1 = z.object({
   schemaVersion: z.literal(1).default(1),
@@ -73,6 +77,7 @@ export interface ChatAppendInput {
 // Payload shapes (not strictly validated — payload is opaque JSON in DB).
 export interface ChatUserPayload {
   text: string;
+  attachments?: Array<{ path: string; name: string; size: number }>;
   attachedSkills?: string[];
 }
 export interface ChatAssistantTextPayload {
@@ -100,10 +105,9 @@ export interface ChatToolCallPayload {
 }
 
 // ---------------------------------------------------------------------------
-// Virtual FS (Workstream E — Phase 2 agent tools)
+// Virtual FS for workspace-backed agent tools.
 //
-// Per-design file tree stored in SQLite, written by the text_editor tool via
-// the agent runtime. Paths are POSIX-relative ("index.html",
+// Per-design workspace file view. Paths are POSIX-relative ("index.html",
 // "_starters/ios-frame.jsx"); never absolute, never contain "..".
 // ---------------------------------------------------------------------------
 

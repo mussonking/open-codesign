@@ -1,6 +1,15 @@
 import type { AgentMessage } from '@mariozechner/pi-agent-core';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { buildTransformContext } from './context-prune.js';
+import type { CoreLogger } from './logger.js';
+
+function mockLogger(): CoreLogger {
+  return {
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  };
+}
 
 function userMsg(text: string): AgentMessage {
   return {
@@ -41,7 +50,8 @@ function assistantText(text: string): AgentMessage {
 
 describe('buildTransformContext — size-based block compaction with recent-turn window', () => {
   it('is a no-op when every block is under its cap', async () => {
-    const transform = buildTransformContext();
+    const log = mockLogger();
+    const transform = buildTransformContext(log);
     const messages: AgentMessage[] = [
       userMsg('hi'),
       assistantWithToolCall('t1', 'small'),
@@ -50,12 +60,15 @@ describe('buildTransformContext — size-based block compaction with recent-turn
     ];
     const out = await transform(messages);
     expect(out).toEqual(messages);
+    expect(log.info).not.toHaveBeenCalled();
+    expect(log.warn).not.toHaveBeenCalled();
   });
 
   it('stubs a large assistant text block even on the LATEST message', async () => {
     // Text cap applies to ALL turns. Guards against the `<artifact>` text
     // dump regression (assistant streamed 9 MB JSX as prose on the final turn).
-    const transform = buildTransformContext();
+    const log = mockLogger();
+    const transform = buildTransformContext(log);
     const huge = 'x'.repeat(50_000);
     const messages: AgentMessage[] = [userMsg('build it'), assistantText(huge)];
     const out = await transform(messages);
@@ -63,6 +76,13 @@ describe('buildTransformContext — size-based block compaction with recent-turn
     const text = last.content[0]?.text ?? '';
     expect(text.startsWith('[prior assistant output dropped')).toBe(true);
     expect(text).toContain('50000B');
+    expect(log.info).toHaveBeenCalledWith(
+      '[context-prune] step=caps',
+      expect.objectContaining({
+        compactedBlocks: 1,
+        reason: 'assistant_text',
+      }),
+    );
   });
 
   it('keeps a large toolCall.input verbatim inside the recent window', async () => {
@@ -124,7 +144,8 @@ describe('buildTransformContext — size-based block compaction with recent-turn
   });
 
   it('stubs large toolResult bodies for older turns outside the window', async () => {
-    const transform = buildTransformContext();
+    const log = mockLogger();
+    const transform = buildTransformContext(log);
     const bulk = 'y'.repeat(20_000);
     const messages: AgentMessage[] = [userMsg('x')];
     messages.push(assistantWithToolCall('call-old', 'a'));
@@ -137,6 +158,12 @@ describe('buildTransformContext — size-based block compaction with recent-turn
     const tr = out[2] as { toolCallId?: string; content: Array<{ text?: string }> };
     expect(tr.toolCallId).toBe('call-old');
     expect(tr.content[0]?.text?.startsWith('[tool result dropped')).toBe(true);
+    expect(log.info).toHaveBeenCalledWith(
+      '[context-prune] step=caps',
+      expect.objectContaining({
+        reason: 'tool_result_text',
+      }),
+    );
   });
 
   it('leaves small blocks untouched regardless of position', async () => {
@@ -159,7 +186,9 @@ describe('buildTransformContext — size-based block compaction with recent-turn
   });
 
   it('tightens to aggressive caps (ignoring window) when HARD_CAP_BYTES is exceeded', async () => {
-    const transform = buildTransformContext();
+    const log = mockLogger();
+    const onAggressivePrune = vi.fn();
+    const transform = buildTransformContext(log, onAggressivePrune);
     const messages: AgentMessage[] = [userMsg('go')];
     const midText = 'p'.repeat(6_000);
     for (let i = 0; i < 40; i += 1) {
@@ -179,5 +208,14 @@ describe('buildTransformContext — size-based block compaction with recent-turn
       }
     }
     expect(droppedTextCount).toBeGreaterThanOrEqual(35);
+    expect(onAggressivePrune).toHaveBeenCalledOnce();
+    expect(log.warn).toHaveBeenCalledWith(
+      '[context-prune] step=aggressive',
+      expect.objectContaining({
+        compactedBlocks: expect.any(Number),
+        compactedBytes: expect.any(Number),
+        reason: expect.stringContaining('assistant_text'),
+      }),
+    );
   });
 });

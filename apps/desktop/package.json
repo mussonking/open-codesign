@@ -1,7 +1,9 @@
 {
   "name": "@open-codesign/desktop",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "private": true,
+  "description": "Prompt-to-design desktop app for HTML prototypes, decks, and marketing assets.",
+  "author": "Open CoDesign Maintainers <maintainers@opencowork.ai>",
   "type": "module",
   "main": "./out/main/index.js",
   "repository": {
@@ -9,15 +11,22 @@
     "url": "git+https://github.com/OpenCoworkAI/open-codesign.git"
   },
   "scripts": {
-    "postinstall": "node scripts/install-sqlite-bindings.cjs",
     "dev": "node scripts/dev.cjs",
-    "build": "electron-vite build && electron-builder",
+    "build": "electron-vite build",
+    "package": "electron-vite build && electron-builder",
     "build:dir": "electron-vite build && electron-builder --dir",
     "release": "electron-vite build && electron-builder --publish never",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "jszip": "^3.10.1",
+    "puppeteer-core": "^24.42.0"
+  },
+  "devDependencies": {
+    "@mariozechner/pi-agent-core": "^0.72.1",
+    "@mariozechner/pi-ai": "^0.72.1",
+    "@mariozechner/pi-coding-agent": "^0.72.1",
     "@open-codesign/artifacts": "workspace:*",
     "@open-codesign/core": "workspace:*",
     "@open-codesign/exporters": "workspace:*",
@@ -27,33 +36,30 @@
     "@open-codesign/shared": "workspace:*",
     "@open-codesign/templates": "workspace:*",
     "@open-codesign/ui": "workspace:*",
-    "better-sqlite3": "^12.9.0",
-    "electron-log": "^5",
-    "electron-updater": "^6.3.9",
-    "lucide-react": "^1.11.0",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "smol-toml": "^1.6.1",
-    "zip-lib": "^1.0.4",
-    "zustand": "^5.0.2"
-  },
-  "devDependencies": {
     "@tailwindcss/postcss": "^4.2.4",
-    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.10.2",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
-    "@vitejs/plugin-react": "^4.3.4",
+    "@vitejs/plugin-react": "^5.2.0",
     "autoprefixer": "^10.4.20",
     "electron": "^39.8.9",
     "electron-builder": "^26.8.1",
     "electron-builder-squirrel-windows": "26.8.1",
-    "electron-vite": "^2.3.0",
+    "electron-log": "^5",
+    "electron-updater": "^6.3.9",
+    "electron-vite": "^5.0.0",
+    "lucide-react": "^1.14.0",
+    "pptxgenjs": "^4.0.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
+    "smol-toml": "^1.6.1",
     "tailwindcss": "^4.2.4",
-    "typescript": "^5.7.2",
-    "vite": "^6.0.5",
-    "vitest": "^2.1.8"
+    "typescript": "^6.0.3",
+    "vite": "^7.3.2",
+    "vitest": "^4.1.5",
+    "zip-lib": "^1.0.4",
+    "zustand": "^5.0.2"
   }
 }

@@ -14,7 +14,6 @@
  */
 
 import { readFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
 import { join, sep as pathSep } from 'node:path';
 import {
   type ActionTimelineEntry,
@@ -23,28 +22,41 @@ import {
   type ListEventsInput,
   type ListEventsResult,
   type RecordRendererErrorResult,
+  type ReportableError,
   type ReportEventInput,
   type ReportEventResult,
-  type ReportableError,
 } from '@open-codesign/shared';
 import { computeFingerprint } from '@open-codesign/shared/fingerprint';
-import type BetterSqlite3 from 'better-sqlite3';
-import { configDir, configPath } from './config';
+import { configDir } from './config';
 import {
   composeSummaryMarkdown,
   redactPathsAndUrls,
   scrubPromptInLine,
 } from './diagnostic-summary';
+import {
+  aliasHome,
+  prettyPlatformVersion,
+  readConfigRedacted,
+  redactForIssueUrl,
+} from './diagnostics/redact';
 import { app, ipcMain, shell } from './electron-runtime';
-import { getLogPath, getLogger, logsDir } from './logger';
+import { getLogger, getLogPath, logsDir } from './logger';
 import { findRecent, recordReported } from './reported-fingerprints';
 import {
+  type Database,
   getDiagnosticEventById,
   listDiagnosticEvents,
   recordDiagnosticEvent,
 } from './snapshots-db';
 
-type Database = BetterSqlite3.Database;
+// Re-export so diagnostics-ipc.test.ts keeps working unchanged.
+export {
+  API_KEY_RE,
+  aliasHome,
+  prettyPlatformVersion,
+  readConfigRedacted,
+  redactSensitiveTomlFields,
+} from './diagnostics/redact';
 
 const logger = getLogger('diagnostics-ipc');
 
@@ -58,7 +70,7 @@ const DIAGNOSTICS_MAX = 500;
 const REPORTED_FINGERPRINTS_FILENAME = 'reported-fingerprints.json';
 
 // Defense-in-depth caps on IPC payload strings. A compromised renderer or
-// buggy caller could otherwise flood the main process / SQLite / bundle with
+// buggy caller could otherwise flood the main process / local store / bundle with
 // multi-MB fields. Keep these generous enough for real stack traces.
 const MESSAGE_MAX = 8_000;
 const STACK_MAX = 16_000;
@@ -79,7 +91,7 @@ function mapPlatform(p: NodeJS.Platform): '' | 'macOS' | 'Windows' | 'Linux' {
 /**
  * Map an upstream_provider string (already normalized lowercase like
  * `anthropic`, `openai`, `google`, `openrouter`, `groq`) to the exact labels
- * the yml provider dropdown accepts. Unknown providers fall back to 'Other'.
+ * the yml provider dropdown accepts. Unknown providers are labeled 'Other'.
  */
 function mapProvider(
   raw: unknown,
@@ -168,75 +180,88 @@ function parseListEventsInput(raw: unknown): ListEventsInput {
   return out;
 }
 
+function requireNonEmptyString(r: Record<string, unknown>, key: string, prefix = ''): string {
+  if (typeof r[key] !== 'string' || (r[key] as string).length === 0) {
+    throw new CodesignError(`${prefix}${key} must be a non-empty string`, 'IPC_BAD_INPUT');
+  }
+  return r[key] as string;
+}
+
+function coerceOptionalString(
+  r: Record<string, unknown>,
+  key: string,
+  prefix = '',
+): string | undefined {
+  if (r[key] === undefined) return undefined;
+  if (typeof r[key] !== 'string') {
+    throw new CodesignError(`${prefix}${key} must be a string if provided`, 'IPC_BAD_INPUT');
+  }
+  return r[key] as string;
+}
+
+function coerceErrorContext(
+  raw: unknown,
+  prefix: 'error.' | '',
+  rejectArrays: boolean,
+): Record<string, unknown> | undefined {
+  if (raw === undefined) return undefined;
+  if (typeof raw !== 'object' || raw === null || (rejectArrays && Array.isArray(raw))) {
+    throw new CodesignError(`${prefix}context must be an object if provided`, 'IPC_BAD_INPUT');
+  }
+  const ctx = raw as Record<string, unknown>;
+  let serializedLen: number;
+  try {
+    serializedLen = JSON.stringify(ctx).length;
+  } catch {
+    throw new CodesignError(`${prefix}context must be JSON-serializable`, 'IPC_BAD_INPUT');
+  }
+  if (serializedLen > CONTEXT_JSON_MAX) {
+    throw new CodesignError(
+      `${prefix}context serialized length exceeds ${CONTEXT_JSON_MAX} characters`,
+      'IPC_BAD_INPUT',
+    );
+  }
+  return ctx;
+}
+
+function assertStringLen(value: string, max: number, label: string): void {
+  if (value.length > max) {
+    throw new CodesignError(`${label} exceeds ${max} characters`, 'IPC_BAD_INPUT');
+  }
+}
+
 function parseReportableError(raw: unknown): ReportableError {
   if (typeof raw !== 'object' || raw === null) {
     throw new CodesignError('error payload must be an object', 'IPC_BAD_INPUT');
   }
   const r = raw as Record<string, unknown>;
-  const requireString = (key: string): string => {
-    if (typeof r[key] !== 'string' || (r[key] as string).length === 0) {
-      throw new CodesignError(`${key} must be a non-empty string`, 'IPC_BAD_INPUT');
-    }
-    return r[key] as string;
-  };
-  const optString = (key: string): string | undefined => {
-    if (r[key] === undefined) return undefined;
-    if (typeof r[key] !== 'string') {
-      throw new CodesignError(`${key} must be a string if provided`, 'IPC_BAD_INPUT');
-    }
-    return r[key] as string;
-  };
   if (typeof r['ts'] !== 'number' || !Number.isFinite(r['ts'])) {
     throw new CodesignError('error.ts must be a finite number', 'IPC_BAD_INPUT');
-  }
-  if (
-    r['context'] !== undefined &&
-    (typeof r['context'] !== 'object' || r['context'] === null || Array.isArray(r['context']))
-  ) {
-    throw new CodesignError('error.context must be an object if provided', 'IPC_BAD_INPUT');
   }
   if (r['persistedEventId'] !== undefined && typeof r['persistedEventId'] !== 'number') {
     throw new CodesignError('error.persistedEventId must be a number if provided', 'IPC_BAD_INPUT');
   }
   const messageField = typeof r['message'] === 'string' ? (r['message'] as string) : '';
-  if (messageField.length > MESSAGE_MAX) {
-    throw new CodesignError(`error.message exceeds ${MESSAGE_MAX} characters`, 'IPC_BAD_INPUT');
-  }
+  assertStringLen(messageField, MESSAGE_MAX, 'error.message');
+  const context = coerceErrorContext(r['context'], 'error.', true);
   const out: ReportableError = {
-    localId: requireString('localId'),
-    code: requireString('code'),
-    scope: requireString('scope'),
+    localId: requireNonEmptyString(r, 'localId'),
+    code: requireNonEmptyString(r, 'code'),
+    scope: requireNonEmptyString(r, 'scope'),
     message: messageField,
-    fingerprint: requireString('fingerprint'),
+    fingerprint: requireNonEmptyString(r, 'fingerprint'),
     ts: r['ts'] as number,
   };
-  const stack = optString('stack');
+  const stack = coerceOptionalString(r, 'stack');
   if (stack !== undefined) {
-    if (stack.length > STACK_MAX) {
-      throw new CodesignError(`error.stack exceeds ${STACK_MAX} characters`, 'IPC_BAD_INPUT');
-    }
+    assertStringLen(stack, STACK_MAX, 'error.stack');
     out.stack = stack;
   }
-  const runId = optString('runId');
+  const runId = coerceOptionalString(r, 'runId');
   if (runId !== undefined) out.runId = runId;
-  if (r['context'] !== undefined) {
-    const ctx = r['context'] as Record<string, unknown>;
-    let serializedLen: number;
-    try {
-      serializedLen = JSON.stringify(ctx).length;
-    } catch {
-      throw new CodesignError('error.context must be JSON-serializable', 'IPC_BAD_INPUT');
-    }
-    if (serializedLen > CONTEXT_JSON_MAX) {
-      throw new CodesignError(
-        `error.context serialized length exceeds ${CONTEXT_JSON_MAX} characters`,
-        'IPC_BAD_INPUT',
-      );
-    }
-    out.context = ctx;
-  }
+  if (context !== undefined) out.context = context;
   if (r['persistedEventId'] !== undefined) out.persistedEventId = r['persistedEventId'] as number;
-  const persistedFp = optString('persistedFingerprint');
+  const persistedFp = coerceOptionalString(r, 'persistedFingerprint');
   if (persistedFp !== undefined) out.persistedFingerprint = persistedFp;
   return out;
 }
@@ -326,44 +351,17 @@ function parseRecordRendererErrorInput(raw: unknown): {
       'IPC_BAD_INPUT',
     );
   }
-  if (typeof r['code'] !== 'string' || (r['code'] as string).length === 0) {
-    throw new CodesignError('code must be a non-empty string', 'IPC_BAD_INPUT');
-  }
-  if (typeof r['scope'] !== 'string' || (r['scope'] as string).length === 0) {
-    throw new CodesignError('scope must be a non-empty string', 'IPC_BAD_INPUT');
-  }
+  const code = requireNonEmptyString(r, 'code');
+  const scope = requireNonEmptyString(r, 'scope');
   if (typeof r['message'] !== 'string') {
     throw new CodesignError('message must be a string', 'IPC_BAD_INPUT');
   }
-  if ((r['message'] as string).length > MESSAGE_MAX) {
-    throw new CodesignError(`message exceeds ${MESSAGE_MAX} characters`, 'IPC_BAD_INPUT');
-  }
-  if (r['stack'] !== undefined && typeof r['stack'] !== 'string') {
-    throw new CodesignError('stack must be a string if provided', 'IPC_BAD_INPUT');
-  }
-  if (r['stack'] !== undefined && (r['stack'] as string).length > STACK_MAX) {
-    throw new CodesignError(`stack exceeds ${STACK_MAX} characters`, 'IPC_BAD_INPUT');
-  }
-  if (r['runId'] !== undefined && typeof r['runId'] !== 'string') {
-    throw new CodesignError('runId must be a string if provided', 'IPC_BAD_INPUT');
-  }
-  if (r['context'] !== undefined && (typeof r['context'] !== 'object' || r['context'] === null)) {
-    throw new CodesignError('context must be an object if provided', 'IPC_BAD_INPUT');
-  }
-  if (r['context'] !== undefined) {
-    let serializedLen: number;
-    try {
-      serializedLen = JSON.stringify(r['context']).length;
-    } catch {
-      throw new CodesignError('context must be JSON-serializable', 'IPC_BAD_INPUT');
-    }
-    if (serializedLen > CONTEXT_JSON_MAX) {
-      throw new CodesignError(
-        `context serialized length exceeds ${CONTEXT_JSON_MAX} characters`,
-        'IPC_BAD_INPUT',
-      );
-    }
-  }
+  const message = r['message'] as string;
+  assertStringLen(message, MESSAGE_MAX, 'message');
+  const stack = coerceOptionalString(r, 'stack');
+  if (stack !== undefined) assertStringLen(stack, STACK_MAX, 'stack');
+  const runId = coerceOptionalString(r, 'runId');
+  const context = coerceErrorContext(r['context'], '', false);
   const out: {
     code: string;
     scope: string;
@@ -371,111 +369,11 @@ function parseRecordRendererErrorInput(raw: unknown): {
     stack?: string;
     runId?: string;
     context?: Record<string, unknown>;
-  } = {
-    code: r['code'] as string,
-    scope: r['scope'] as string,
-    message: r['message'] as string,
-  };
-  if (r['stack'] !== undefined) out.stack = r['stack'] as string;
-  if (r['runId'] !== undefined) out.runId = r['runId'] as string;
-  if (r['context'] !== undefined) out.context = r['context'] as Record<string, unknown>;
+  } = { code, scope, message };
+  if (stack !== undefined) out.stack = stack;
+  if (runId !== undefined) out.runId = runId;
+  if (context !== undefined) out.context = context;
   return out;
-}
-
-/** Regex that matches common API key shapes; used as a secondary pass so keys
- *  that leak into unexpected fields (e.g. `notes = "my sk-abcdef..."`) still
- *  get masked. Format-based so it is necessarily narrow — the primary defense
- *  is field-based redaction below. The alternation covers:
- *    - OpenAI/Anthropic-style `sk-...`
- *    - Google Gemini `AIzaSy...`
- *    - AWS access key `AKIA...`
- *    - Azure-shape 43-char base64 ending in `=` (slightly greedy but rare)
- *    - Hex-32+ (generic hash/token)
- *    - `Bearer <token>` headers
- */
-export const API_KEY_RE =
-  /(sk-[A-Za-z0-9-_]{20,}|AIzaSy[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16}|[A-Za-z0-9+/]{43}=|[a-f0-9]{32,}|Bearer\s+[A-Za-z0-9._~+/=-]+)/g;
-
-/**
- * Replace the user's home directory prefix in a path with `~` so bug reports
- * don't leak the OS account name. Handles both POSIX and Windows separators.
- */
-export function aliasHome(p: string): string {
-  const home = homedir();
-  if (!home) return p;
-  if (p === home) return '~';
-  if (p.startsWith(`${home}/`)) return `~${p.slice(home.length)}`;
-  if (p.startsWith(`${home}\\`)) return `~${p.slice(home.length)}`;
-  return p;
-}
-
-/**
- * Convert `os.release()` into a user-recognizable marketing name when we can.
- *   - Windows NT build → "Windows 10" / "Windows 11" + the raw build in parens.
- *   - macOS / Linux: leave as-is (Darwin kernel version is what maintainers
- *     are used to, and Linux distro mapping is a rabbit hole).
- */
-export function prettyPlatformVersion(platform: NodeJS.Platform, osRelease: string): string {
-  if (platform !== 'win32') return osRelease;
-  const match = /^10\.0\.(\d+)/.exec(osRelease);
-  if (!match) return osRelease;
-  const build = Number(match[1]);
-  if (build >= 22000) return `Windows 11 (${osRelease})`;
-  if (build >= 10240) return `Windows 10 (${osRelease})`;
-  return osRelease;
-}
-
-/**
- * Apply the user's redaction toggles to free-form text — the same pipeline
- * `summary.md` uses — so fields pre-filled into a GitHub issue URL honor the
- * toggles rather than dumping raw log tails into browser history / referrer.
- */
-function redactForIssueUrl(
-  text: string,
-  opts: { includePromptText: boolean; includePaths: boolean; includeUrls: boolean },
-): string {
-  let out = text;
-  if (!opts.includePromptText) out = scrubPromptInLine(out);
-  out = redactPathsAndUrls(out, {
-    includePaths: opts.includePaths,
-    includeUrls: opts.includeUrls,
-  });
-  return out;
-}
-
-/** Mask the VALUE of any TOML line whose key looks sensitive, regardless of
- *  the value's format. Google (AIzaSy...), Azure base64, DeepSeek, and future
- *  bearer tokens all slip past format-based regexes. The `ciphertext` field
- *  is this codebase's specific storage slot for persisted secrets (safeStorage
- *  ciphertext, or in migrated/dev paths a literal plaintext token prefixed
- *  `plain:`) — redact unconditionally. `mask` is the user-visible display
- *  form and already pre-obscured, so it's intentionally NOT on this list. */
-export function redactSensitiveTomlFields(s: string): string {
-  return s.replace(
-    /^(\s*(?:api_?key|token|bearer|secret|access_?token|refresh_?token|password|ciphertext|auth_?token|credential)\s*=\s*)"[^"]*"/gim,
-    '$1"***REDACTED***"',
-  );
-}
-
-export async function readConfigRedacted(opts: {
-  includePaths: boolean;
-  includeUrls: boolean;
-}): Promise<string> {
-  try {
-    const raw = await readFile(configPath(), 'utf8');
-    // Strip prompt / history fields first (multi-line values between quotes).
-    const noPrompts = raw.replace(/^(prompt|history)\s*=\s*"""[\s\S]*?"""/gm, '');
-    // Field-based redaction is the primary defense; format-based is a fallback
-    // for keys that leak into non-sensitive-looking fields.
-    const fieldMasked = redactSensitiveTomlFields(noPrompts);
-    const keyMasked = fieldMasked.replace(API_KEY_RE, '***REDACTED***');
-    // Paths (baseUrl, designSystem.rootPath, …) and URLs (including ones with
-    // embedded credentials) only get omitted if the caller hasn't explicitly
-    // opted in. The filename says "redacted" — we must not lie about it.
-    return redactPathsAndUrls(keyMasked, opts);
-  } catch {
-    return '(config not readable)';
-  }
 }
 
 async function readLogTail(maxLines: number): Promise<string[]> {
@@ -583,6 +481,93 @@ export async function buildBundle(opts: {
   }
 
   return destPath;
+}
+
+async function handleReportEvent(
+  db: Database | null,
+  input: ReportEventInput,
+): Promise<ReportEventResult> {
+  const error = input.error;
+
+  // If the ReportableError was persisted into the diagnostic event store earlier,
+  // surface the DB row's `count` + `context_json` so the bundle carries
+  // the richer repeat-count and any context the renderer didn't ship. All
+  // of this is nice-to-have; Report works end-to-end without the DB.
+  let dbCount = 1;
+  if (db !== null && typeof error.persistedEventId === 'number') {
+    const row = getDiagnosticEventById(db, error.persistedEventId);
+    if (row !== undefined) {
+      dbCount = row.count;
+      if (error.context === undefined && row.context !== undefined) {
+        error.context = row.context;
+      }
+    }
+  }
+
+  const recentLogTail = await readLogTail(50);
+  const summaryMarkdown = composeSummaryMarkdown({
+    error,
+    count: dbCount,
+    level: 'error',
+    transient: false,
+    appVersion: app.getVersion(),
+    platform: process.platform,
+    electronVersion: process.versions.electron ?? 'unknown',
+    nodeVersion: process.versions.node,
+    timeline: input.timeline,
+    recentLogTail,
+    notes: input.notes,
+    includePromptText: input.includePromptText,
+    includePaths: input.includePaths,
+    includeUrls: input.includeUrls,
+    includeTimeline: input.includeTimeline,
+  });
+
+  const bundlePath = await buildBundle({
+    summaryMarkdown,
+    includePromptText: input.includePromptText,
+    includePaths: input.includePaths,
+    includeUrls: input.includeUrls,
+  });
+  const os = await import('node:os');
+  const issueUrl = buildIssueUrlWithTemplate({
+    error,
+    bundlePath,
+    appVersion: app.getVersion(),
+    platform: process.platform,
+    platformVersion: prettyPlatformVersion(process.platform, os.release()),
+    logTail: recentLogTail,
+    notes: input.notes,
+    includePromptText: input.includePromptText,
+    includePaths: input.includePaths,
+    includeUrls: input.includeUrls,
+  });
+
+  try {
+    // SECURITY: never trust the renderer-supplied fingerprint for dedup.
+    // Recompute main-side from errorCode + stack + message so a compromised
+    // renderer can't spoof or bypass the "recently reported" record.
+    const fp = computeFingerprint({
+      errorCode: error.code,
+      stack: error.stack,
+      message: error.message,
+    });
+    recordReported(reportedFingerprintsPath(), fp, issueUrl);
+  } catch (err) {
+    logger.warn('diagnostics.reported.dedupWrite.fail', {
+      message: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  logger.info('diagnostics.reported', {
+    localId: error.localId,
+    code: error.code,
+    fingerprint: error.fingerprint,
+    persistedEventId: error.persistedEventId,
+    bundlePath,
+  });
+
+  return { schemaVersion: 1, issueUrl, bundlePath, summaryMarkdown };
 }
 
 async function buildDiagnosticsZip(): Promise<string> {
@@ -720,57 +705,68 @@ function fenceLogs(lines: string[], max: number): string {
   return `\`\`\`\n${body}\n\`\`\``;
 }
 
+function dispatchRendererLog(entry: RendererLogEntry): void {
+  const scopedLogger = getLogger(`renderer:${entry.scope}`);
+  const fields: Record<string, unknown> = {};
+  if (entry.data !== undefined) {
+    Object.assign(fields, entry.data);
+  }
+  // Stack is forwarded as a separate key, never concatenated into the message,
+  // so it doesn't duplicate what electron-log already captures per-error.
+  if (entry.stack !== undefined) {
+    fields['stack'] = entry.stack;
+  }
+  switch (entry.level) {
+    case 'info':
+      scopedLogger.info(entry.message, fields);
+      break;
+    case 'warn':
+      scopedLogger.warn(entry.message, fields);
+      break;
+    case 'error':
+      scopedLogger.error(entry.message, fields);
+      break;
+  }
+}
+
+function persistRendererErrorEntry(db: Database, entry: RendererLogEntry): void {
+  const dataCode =
+    entry.data !== undefined && typeof entry.data['code'] === 'string'
+      ? (entry.data['code'] as string)
+      : undefined;
+  const code = dataCode ?? 'RENDERER_ERROR';
+  const runId =
+    entry.data !== undefined && typeof entry.data['runId'] === 'string'
+      ? (entry.data['runId'] as string)
+      : undefined;
+  recordDiagnosticEvent(db, {
+    level: 'error',
+    code,
+    scope: entry.scope,
+    runId,
+    fingerprint: computeFingerprint({
+      errorCode: code,
+      stack: entry.stack,
+      message: entry.message,
+    }),
+    message: entry.message,
+    stack: entry.stack,
+    transient: false,
+  });
+}
+
+function handleRendererLog(db: Database | null, raw: unknown): void {
+  const entry = parseLogEntry(raw);
+  dispatchRendererLog(entry);
+  // Persist only error-level renderer entries into the local diagnostic store.
+  if (entry.level === 'error' && db !== null) {
+    persistRendererErrorEntry(db, entry);
+  }
+}
+
 export function registerDiagnosticsIpc(db: Database | null): void {
   ipcMain.handle('diagnostics:v1:log', (_e: unknown, raw: unknown): void => {
-    const entry = parseLogEntry(raw);
-    const scopedLogger = getLogger(`renderer:${entry.scope}`);
-    const fields: Record<string, unknown> = {};
-    if (entry.data !== undefined) {
-      Object.assign(fields, entry.data);
-    }
-    // Stack is forwarded as a separate key, never concatenated into the message,
-    // so it doesn't duplicate what electron-log already captures per-error.
-    if (entry.stack !== undefined) {
-      fields['stack'] = entry.stack;
-    }
-    switch (entry.level) {
-      case 'info':
-        scopedLogger.info(entry.message, fields);
-        break;
-      case 'warn':
-        scopedLogger.warn(entry.message, fields);
-        break;
-      case 'error':
-        scopedLogger.error(entry.message, fields);
-        break;
-    }
-
-    // Persist only error-level renderer entries into diagnostic_events.
-    if (entry.level === 'error' && db !== null) {
-      const dataCode =
-        entry.data !== undefined && typeof entry.data['code'] === 'string'
-          ? (entry.data['code'] as string)
-          : undefined;
-      const code = dataCode ?? 'RENDERER_ERROR';
-      const runId =
-        entry.data !== undefined && typeof entry.data['runId'] === 'string'
-          ? (entry.data['runId'] as string)
-          : undefined;
-      recordDiagnosticEvent(db, {
-        level: 'error',
-        code,
-        scope: entry.scope,
-        runId,
-        fingerprint: computeFingerprint({
-          errorCode: code,
-          stack: entry.stack,
-          message: entry.message,
-        }),
-        message: entry.message,
-        stack: entry.stack,
-        transient: false,
-      });
-    }
+    handleRendererLog(db, raw);
   });
 
   ipcMain.handle(
@@ -865,87 +861,7 @@ export function registerDiagnosticsIpc(db: Database | null): void {
     'diagnostics:v1:reportEvent',
     async (_e: unknown, raw: unknown): Promise<ReportEventResult> => {
       const input = parseReportEventInput(raw);
-      const error = input.error;
-
-      // If the ReportableError was persisted into diagnostic_events earlier,
-      // surface the DB row's `count` + `context_json` so the bundle carries
-      // the richer repeat-count and any context the renderer didn't ship. All
-      // of this is nice-to-have; Report works end-to-end without the DB.
-      let dbCount = 1;
-      if (db !== null && typeof error.persistedEventId === 'number') {
-        const row = getDiagnosticEventById(db, error.persistedEventId);
-        if (row !== undefined) {
-          dbCount = row.count;
-          if (error.context === undefined && row.context !== undefined) {
-            error.context = row.context;
-          }
-        }
-      }
-
-      const recentLogTail = await readLogTail(50);
-      const summaryMarkdown = composeSummaryMarkdown({
-        error,
-        count: dbCount,
-        level: 'error',
-        transient: false,
-        appVersion: app.getVersion(),
-        platform: process.platform,
-        electronVersion: process.versions.electron ?? 'unknown',
-        nodeVersion: process.versions.node,
-        timeline: input.timeline,
-        recentLogTail,
-        notes: input.notes,
-        includePromptText: input.includePromptText,
-        includePaths: input.includePaths,
-        includeUrls: input.includeUrls,
-        includeTimeline: input.includeTimeline,
-      });
-
-      const bundlePath = await buildBundle({
-        summaryMarkdown,
-        includePromptText: input.includePromptText,
-        includePaths: input.includePaths,
-        includeUrls: input.includeUrls,
-      });
-      const os = await import('node:os');
-      const issueUrl = buildIssueUrlWithTemplate({
-        error,
-        bundlePath,
-        appVersion: app.getVersion(),
-        platform: process.platform,
-        platformVersion: prettyPlatformVersion(process.platform, os.release()),
-        logTail: recentLogTail,
-        notes: input.notes,
-        includePromptText: input.includePromptText,
-        includePaths: input.includePaths,
-        includeUrls: input.includeUrls,
-      });
-
-      try {
-        // SECURITY: never trust the renderer-supplied fingerprint for dedup.
-        // Recompute main-side from errorCode + stack + message so a compromised
-        // renderer can't spoof or bypass the "recently reported" record.
-        const fp = computeFingerprint({
-          errorCode: error.code,
-          stack: error.stack,
-          message: error.message,
-        });
-        recordReported(reportedFingerprintsPath(), fp, issueUrl);
-      } catch (err) {
-        logger.warn('diagnostics.reported.dedupWrite.fail', {
-          message: err instanceof Error ? err.message : String(err),
-        });
-      }
-
-      logger.info('diagnostics.reported', {
-        localId: error.localId,
-        code: error.code,
-        fingerprint: error.fingerprint,
-        persistedEventId: error.persistedEventId,
-        bundlePath,
-      });
-
-      return { schemaVersion: 1, issueUrl, bundlePath, summaryMarkdown };
+      return handleReportEvent(db, input);
     },
   );
 

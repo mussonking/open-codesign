@@ -1,29 +1,22 @@
 import { existsSync } from 'node:fs';
-import { copyFile, mkdir } from 'node:fs/promises';
+import { copyFile, mkdir, stat } from 'node:fs/promises';
 import path from 'node:path';
-import type { Design } from '@open-codesign/shared';
-import type Database from 'better-sqlite3';
+import type { Design, WorkspaceMode } from '@open-codesign/shared';
 import { type BrowserWindow, dialog, shell } from 'electron';
 import { getLogger } from './logger';
 import {
   clearDesignWorkspace,
+  type Database,
   getDesign,
-  listDesignFiles,
+  listDesigns,
   updateDesignWorkspace,
 } from './snapshots-db';
+import { normalizeWorkspacePath } from './workspace-path';
+import { listWorkspaceFilesAt, resolveSafeWorkspaceChildPath } from './workspace-reader';
+
+export { normalizeWorkspacePath } from './workspace-path';
 
 const logger = getLogger('design-workspace');
-
-function stripTrailingSlash(value: string): string {
-  if (value === '/' || /^[A-Za-z]:\/$/.test(value)) {
-    return value;
-  }
-  return value.replace(/\/+$/, '');
-}
-
-export function normalizeWorkspacePath(p: string): string {
-  return stripTrailingSlash(path.resolve(p).replaceAll('\\', '/'));
-}
 
 function workspacePathComparisonKey(p: string): string {
   const normalized = normalizeWorkspacePath(p);
@@ -48,23 +41,38 @@ export async function openWorkspaceFolder(p: string): Promise<void> {
 }
 
 export function checkWorkspaceConflict(
-  db: Database.Database,
+  db: Database,
   designId: string,
   normalizedPath: string,
 ): boolean {
+  return findWorkspaceConflict(db, designId, normalizedPath) !== null;
+}
+
+export function findWorkspaceConflict(
+  db: Database,
+  designId: string,
+  normalizedPath: string,
+): Design | null {
   const comparisonPath = workspacePathComparisonKey(normalizedPath);
-  const rows = db
-    .prepare('SELECT workspace_path FROM designs WHERE id != ? AND deleted_at IS NULL')
-    .all(designId) as Array<{ workspace_path: string | null }>;
-  return rows.some(
-    (row) =>
-      row.workspace_path !== null &&
-      workspacePathComparisonKey(row.workspace_path) === comparisonPath,
+  return (
+    listDesigns(db).find(
+      (design) =>
+        design.id !== designId &&
+        design.workspacePath !== null &&
+        workspacePathComparisonKey(design.workspacePath) === comparisonPath,
+    ) ?? null
   );
 }
 
+function workspaceConflictMessage(conflict: Design): string {
+  return [
+    `Workspace path is already bound to another design ("${conflict.name}").`,
+    'Choose a different folder, or open that design and change its workspace before reusing this folder.',
+  ].join(' ');
+}
+
 export async function migrateWorkspaceFiles(
-  db: Database.Database,
+  db: Database,
   designId: string,
   destPath: string,
 ): Promise<void> {
@@ -75,20 +83,35 @@ export async function migrateWorkspaceFiles(
   if (design.workspacePath === null) {
     throw new Error('Cannot migrate workspace files without an existing workspace path');
   }
+  const sourceRoot = normalizeWorkspacePath(design.workspacePath);
+  const destinationRoot = normalizeWorkspacePath(destPath);
 
-  const trackedFiles = listDesignFiles(db, designId);
-  const pendingCopies = trackedFiles.map((file) => ({
-    source: path.join(design.workspacePath as string, file.path),
-    destination: path.join(destPath, file.path),
-    relativePath: file.path,
-  }));
+  await copyTrackedWorkspaceFiles(db, designId, sourceRoot, destinationRoot);
+}
+
+export async function copyTrackedWorkspaceFiles(
+  _db: Database,
+  _designId: string,
+  sourceRoot: string,
+  destPath: string,
+): Promise<void> {
+  const source = normalizeWorkspacePath(sourceRoot);
+  const destinationRoot = normalizeWorkspacePath(destPath);
+  const trackedFiles = await listWorkspaceFilesAt(source);
+  const pendingCopies = await Promise.all(
+    trackedFiles.map(async (file) => ({
+      source: await resolveSafeWorkspaceChildPath(source, file.path),
+      destination: await resolveSafeWorkspaceChildPath(destinationRoot, file.path),
+      relativePath: file.path,
+    })),
+  );
 
   for (const copyOp of pendingCopies) {
     if (existsSync(copyOp.destination)) {
       throw new Error(`Workspace migration collision: ${copyOp.relativePath}`);
     }
     if (!existsSync(copyOp.source)) {
-      throw new Error(`Tracked workspace file missing: ${copyOp.relativePath}`);
+      throw new Error(`Workspace file missing: ${copyOp.relativePath}`);
     }
   }
 
@@ -98,7 +121,7 @@ export async function migrateWorkspaceFiles(
   }
 }
 
-function requireDesign(db: Database.Database, designId: string): Design {
+function requireDesign(db: Database, designId: string): Design {
   const design = getDesign(db, designId);
   if (design === null) {
     throw new Error(`Design not found: ${designId}`);
@@ -106,15 +129,24 @@ function requireDesign(db: Database.Database, designId: string): Design {
   return design;
 }
 
+async function assertExistingWorkspaceDirectory(workspacePath: string): Promise<void> {
+  const entry = await stat(workspacePath);
+  if (!entry.isDirectory()) {
+    throw new Error('Workspace path is not a directory');
+  }
+}
+
 export function checkWorkspaceFolderExists(p: string): boolean {
   return existsSync(p);
 }
 
 export async function bindWorkspace(
-  db: Database.Database,
+  db: Database,
   designId: string,
   workspacePath: string | null,
   migrateFiles: boolean,
+  workspaceMode?: WorkspaceMode,
+  options?: { allowExistingWorkspaceBinding?: boolean },
 ): Promise<Design> {
   const current = requireDesign(db, designId);
 
@@ -137,9 +169,11 @@ export async function bindWorkspace(
     logger.info('workspace.bind.noop', { designId, workspacePath: normalizedPath });
     return current;
   }
-  if (checkWorkspaceConflict(db, designId, normalizedPath)) {
-    throw new Error('Workspace path is already bound to another design');
+  const conflict = findWorkspaceConflict(db, designId, normalizedPath);
+  if (conflict !== null && options?.allowExistingWorkspaceBinding !== true) {
+    throw new Error(workspaceConflictMessage(conflict));
   }
+  await assertExistingWorkspaceDirectory(normalizedPath);
 
   logger.info('workspace.bind.start', {
     designId,
@@ -151,7 +185,7 @@ export async function bindWorkspace(
     await migrateWorkspaceFiles(db, designId, normalizedPath);
   }
 
-  const updated = updateDesignWorkspace(db, designId, normalizedPath);
+  const updated = updateDesignWorkspace(db, designId, normalizedPath, workspaceMode);
   if (updated === null) {
     throw new Error(`Design not found: ${designId}`);
   }

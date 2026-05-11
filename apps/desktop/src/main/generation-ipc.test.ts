@@ -1,9 +1,13 @@
 import { CancelGenerationPayloadV1, CodesignError } from '@open-codesign/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  acquireInFlightWorkspaceGeneration,
   armGenerationTimeout,
   cancelGenerationRequest,
   extractGenerationTimeoutError,
+  listInFlightGenerations,
+  withInFlightGeneration,
+  withInFlightGenerationForDesign,
 } from './generation-ipc';
 
 function makeController() {
@@ -70,6 +74,188 @@ describe('cancelGenerationRequest', () => {
     expect(() =>
       CancelGenerationPayloadV1.parse({ schemaVersion: 2, generationId: 'gen-1' }),
     ).toThrow();
+  });
+});
+
+describe('withInFlightGeneration', () => {
+  it('registers a generation while it runs and clears it after success', async () => {
+    const controller = new AbortController();
+    const inFlight = new Map<string, AbortController>();
+
+    const result = await withInFlightGeneration('gen-1', inFlight, controller, async () => {
+      expect(inFlight.get('gen-1')).toBe(controller);
+      return 'ok';
+    });
+
+    expect(result).toBe('ok');
+    expect(inFlight.has('gen-1')).toBe(false);
+  });
+
+  it('clears a generation when preflight work throws before timeout arming', async () => {
+    const controller = new AbortController();
+    const inFlight = new Map<string, AbortController>();
+    const error = new CodesignError('unsupported reference URL', 'REFERENCE_URL_UNSUPPORTED');
+
+    await expect(
+      withInFlightGeneration('gen-1', inFlight, controller, async () => {
+        expect(inFlight.get('gen-1')).toBe(controller);
+        throw error;
+      }),
+    ).rejects.toBe(error);
+
+    expect(inFlight.has('gen-1')).toBe(false);
+  });
+
+  it('does not clear a newer controller registered under the same id', async () => {
+    const oldController = new AbortController();
+    const newController = new AbortController();
+    const inFlight = new Map<string, AbortController>();
+
+    const result = await withInFlightGeneration('gen-1', inFlight, oldController, async () => {
+      inFlight.set('gen-1', newController);
+      return 'old-done';
+    });
+
+    expect(result).toBe('old-done');
+    expect(inFlight.get('gen-1')).toBe(newController);
+  });
+});
+
+describe('withInFlightGenerationForDesign', () => {
+  it('rejects a second generation for the same design while the first is running', async () => {
+    const controller = new AbortController();
+    const otherController = new AbortController();
+    const inFlight = new Map<string, AbortController>();
+    const inFlightByDesign = new Map<string, { generationId: string; startedAt: number }>();
+    let releaseFirst!: () => void;
+    const firstDone = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+
+    const first = withInFlightGenerationForDesign(
+      'gen-1',
+      'design-1',
+      inFlight,
+      inFlightByDesign,
+      controller,
+      async () => {
+        await firstDone;
+        return 'done';
+      },
+    );
+
+    await vi.waitFor(() => expect(inFlightByDesign.get('design-1')?.generationId).toBe('gen-1'));
+    await expect(
+      withInFlightGenerationForDesign(
+        'gen-2',
+        'design-1',
+        inFlight,
+        inFlightByDesign,
+        otherController,
+        async () => 'should-not-run',
+      ),
+    ).rejects.toMatchObject({
+      name: 'CodesignError',
+      code: 'GENERATION_ALREADY_RUNNING',
+    });
+
+    expect(inFlight.get('gen-1')).toBe(controller);
+    expect(inFlight.has('gen-2')).toBe(false);
+    releaseFirst();
+    await expect(first).resolves.toBe('done');
+    expect(inFlightByDesign.has('design-1')).toBe(false);
+  });
+
+  it('allows different designs to run concurrently', async () => {
+    const inFlight = new Map<string, AbortController>();
+    const inFlightByDesign = new Map<string, { generationId: string; startedAt: number }>();
+    const firstController = new AbortController();
+    const secondController = new AbortController();
+
+    await expect(
+      Promise.all([
+        withInFlightGenerationForDesign(
+          'gen-1',
+          'design-1',
+          inFlight,
+          inFlightByDesign,
+          firstController,
+          async () => 'one',
+        ),
+        withInFlightGenerationForDesign(
+          'gen-2',
+          'design-2',
+          inFlight,
+          inFlightByDesign,
+          secondController,
+          async () => 'two',
+        ),
+      ]),
+    ).resolves.toEqual(['one', 'two']);
+  });
+
+  it('clears the design lock when cancellation removes the generation', async () => {
+    const controller = makeController();
+    const inFlight = new Map([['gen-1', controller]]);
+    const inFlightByDesign = new Map([['design-1', { generationId: 'gen-1', startedAt: 1234 }]]);
+    const inFlightByWorkspace = new Map([
+      ['/workspace', { generationId: 'gen-1', startedAt: 1234 }],
+    ]);
+    const logIpc = { info: vi.fn() };
+
+    cancelGenerationRequest('gen-1', inFlight, logIpc, inFlightByDesign, inFlightByWorkspace);
+
+    expect(inFlight.has('gen-1')).toBe(false);
+    expect(inFlightByDesign.has('design-1')).toBe(false);
+    expect(inFlightByWorkspace.has('/workspace')).toBe(false);
+  });
+});
+
+describe('acquireInFlightWorkspaceGeneration', () => {
+  it('rejects a second generation for the same workspace while the first is running', () => {
+    const inFlightByWorkspace = new Map<string, { generationId: string; startedAt: number }>();
+    const release = acquireInFlightWorkspaceGeneration('gen-1', '/workspace', inFlightByWorkspace);
+
+    expect(() =>
+      acquireInFlightWorkspaceGeneration('gen-2', '/workspace', inFlightByWorkspace),
+    ).toThrow(CodesignError);
+
+    release();
+    expect(inFlightByWorkspace.has('/workspace')).toBe(false);
+  });
+
+  it('allows different workspaces to run concurrently', () => {
+    const inFlightByWorkspace = new Map<string, { generationId: string; startedAt: number }>();
+    const releaseOne = acquireInFlightWorkspaceGeneration(
+      'gen-1',
+      '/workspace-a',
+      inFlightByWorkspace,
+    );
+    const releaseTwo = acquireInFlightWorkspaceGeneration(
+      'gen-2',
+      '/workspace-b',
+      inFlightByWorkspace,
+    );
+
+    expect([...inFlightByWorkspace.keys()].sort()).toEqual(['/workspace-a', '/workspace-b']);
+
+    releaseOne();
+    releaseTwo();
+    expect(inFlightByWorkspace.size).toBe(0);
+  });
+});
+
+describe('listInFlightGenerations', () => {
+  it('returns design/generation start times from the main-process in-flight registry', () => {
+    const inFlightByDesign = new Map([
+      ['design-b', { generationId: 'gen-b', startedAt: 2000 }],
+      ['design-a', { generationId: 'gen-a', startedAt: 1000 }],
+    ]);
+
+    expect(listInFlightGenerations(inFlightByDesign)).toEqual([
+      { designId: 'design-a', generationId: 'gen-a', startedAt: 1000 },
+      { designId: 'design-b', generationId: 'gen-b', startedAt: 2000 },
+    ]);
   });
 });
 

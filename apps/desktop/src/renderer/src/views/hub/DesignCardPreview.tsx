@@ -1,7 +1,10 @@
-import { buildSrcdoc } from '@open-codesign/runtime';
+import { buildPreviewDocument, requiresPreviewScripts } from '@open-codesign/runtime';
 import type { Design } from '@open-codesign/shared';
+import { DEFAULT_SOURCE_ENTRY } from '@open-codesign/shared';
 import { Plus } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { inferPreviewSourcePath, resolveDesignPreviewSource } from '../../preview/workspace-source';
+import { useCodesignStore } from '../../store';
 
 // Hub cards render many iframes in parallel; live CSS animations / transitions /
 // autoplaying media in each one thrash compositor + GPU for no user value (the
@@ -29,42 +32,42 @@ function injectThumbnailStyle(srcDoc: string): string {
   return THUMBNAIL_STYLE + srcDoc;
 }
 
-// Lightweight JSX detection — mirrors runtime's isJsxArtifact without importing it.
-// JSX markers take priority over HTML tags: our agent always emits
-// `EDITMODE-BEGIN` (and often `ReactDOM.createRoot`) in JSX artifacts, and the
-// JSX body itself commonly includes `<html>`/`<head>` tags inside a
-// `function App(){ return <html>...</html> }` return. Checking HTML first made
-// every JSX thumbnail render as raw source text in the hub grid.
-export function needsJsxRuntime(source: string): boolean {
-  const hasJsxMarker =
-    /EDITMODE-BEGIN/.test(source) ||
-    /ReactDOM\.createRoot\s*\(/.test(source) ||
-    /^\s*function\s+App\s*\(/m.test(source);
-  if (hasJsxMarker) return true;
-  if (/<!doctype/i.test(source) || /<html[^>]*>/i.test(source)) return false;
-  return false;
+export function needsJsxRuntime(source: string, path?: string): boolean {
+  return requiresPreviewScripts(source, path);
 }
 
 export interface DesignCardPreviewProps {
   design: Design;
 }
 
+interface PreviewCardSource {
+  content: string;
+  path: string;
+}
+
 // Two-tier cache: in-memory (hot path, survives tab switches in a single
 // session) + localStorage (cold start after reopening the app). Keyed on
 // designId + updatedAt so a fresh generate invalidates automatically.
-const memCache = new Map<string, string>();
-const LS_PREFIX = 'designCardPreview:';
-const LS_MAX_CHARS = 300_000; // ~ 300 KB per entry ceiling; skip caching huge HTML
+const memCache = new Map<string, PreviewCardSource>();
+const CACHE_VERSION = 'v3';
+const LEGACY_LS_PREFIX = 'designCardPreview:v2:';
+const LS_PREFIX = `designCardPreview:${CACHE_VERSION}:`;
+const LS_MAX_CHARS = 300_000; // ~ 300 KB per entry ceiling; skip caching huge sources
 const LS_MAX_ENTRIES = 40;
 const MEM_MAX_ENTRIES = 40;
+const inflightReads = new Map<string, Promise<PreviewCardSource | null>>();
 
 function cacheKey(id: string, updatedAt: string): string {
+  return `${CACHE_VERSION}:${id}:${updatedAt}`;
+}
+
+function requestKey(id: string, updatedAt: string): string {
   return `${id}:${updatedAt}`;
 }
 
 // Map preserves insertion order, so delete+set on access makes the eviction
 // loop drop the least-recently-used key when the cache overflows.
-function memCacheTouch(key: string, value: string): void {
+function memCacheTouch(key: string, value: PreviewCardSource): void {
   memCache.delete(key);
   memCache.set(key, value);
   while (memCache.size > MEM_MAX_ENTRIES) {
@@ -74,7 +77,28 @@ function memCacheTouch(key: string, value: string): void {
   }
 }
 
-function readCache(key: string): string | null {
+export function parseCachedPreview(raw: string): PreviewCardSource | null {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      (parsed as Record<string, unknown>)['schemaVersion'] === 1 &&
+      typeof (parsed as Record<string, unknown>)['content'] === 'string' &&
+      typeof (parsed as Record<string, unknown>)['path'] === 'string'
+    ) {
+      return {
+        content: (parsed as Record<string, string>)['content'] ?? '',
+        path: (parsed as Record<string, string>)['path'] ?? DEFAULT_SOURCE_ENTRY,
+      };
+    }
+  } catch {
+    // Legacy v2 values were raw source strings.
+  }
+  return raw.trim().length > 0 ? { content: raw, path: inferPreviewSourcePath(raw) } : null;
+}
+
+function readCache(key: string): PreviewCardSource | null {
   const hit = memCache.get(key);
   if (hit !== undefined) {
     memCacheTouch(key, hit);
@@ -83,25 +107,53 @@ function readCache(key: string): string | null {
   if (typeof localStorage === 'undefined') return null;
   try {
     const raw = localStorage.getItem(LS_PREFIX + key);
-    if (raw !== null) memCacheTouch(key, raw);
-    return raw;
+    const legacyRaw = raw ?? localStorage.getItem(LEGACY_LS_PREFIX + key);
+    if (legacyRaw === null) return null;
+    const parsed = parseCachedPreview(legacyRaw);
+    if (parsed !== null) memCacheTouch(key, parsed);
+    return parsed;
   } catch {
     return null;
   }
 }
 
-function writeCache(key: string, html: string): void {
-  memCacheTouch(key, html);
+function writeCache(key: string, source: PreviewCardSource): void {
+  memCacheTouch(key, source);
   if (typeof localStorage === 'undefined') return;
-  if (html.length > LS_MAX_CHARS) return;
+  const raw = JSON.stringify({ schemaVersion: 1, path: source.path, content: source.content });
+  if (raw.length > LS_MAX_CHARS) return;
   try {
     // Best-effort eviction: if localStorage is near its quota, pruning the
     // oldest preview keys lets the new one fit. We cap total entries, too.
     pruneOldestCacheEntriesIfNeeded();
-    localStorage.setItem(LS_PREFIX + key, html);
+    localStorage.setItem(LS_PREFIX + key, raw);
   } catch {
     // Quota exceeded or storage disabled — ignore, we still have in-memory.
   }
+}
+
+export function clearPreviewCardCachesForTest(): void {
+  memCache.clear();
+  inflightReads.clear();
+}
+
+export function hubScrollRootForCard(el: HTMLElement): Element | null {
+  return el.closest('[data-codesign-hub-scroll-root]');
+}
+
+export function workspaceBaseHrefForPreview(
+  design: Pick<Design, 'id' | 'workspacePath'>,
+  sourcePath: string,
+): string | undefined {
+  if (!design.workspacePath) return undefined;
+  const slashIndex = sourcePath.replaceAll('\\', '/').lastIndexOf('/');
+  const dir = slashIndex >= 0 ? sourcePath.slice(0, slashIndex + 1) : '';
+  const encodedDir = dir
+    .split('/')
+    .filter((segment) => segment.length > 0)
+    .map(encodeURIComponent)
+    .join('/');
+  return `workspace://${design.id}/${encodedDir}${encodedDir.length > 0 ? '/' : ''}`;
 }
 
 function pruneOldestCacheEntriesIfNeeded(): void {
@@ -125,8 +177,37 @@ function pruneOldestCacheEntriesIfNeeded(): void {
   }
 }
 
+function previewCardSourceFromRaw(content: string): PreviewCardSource | null {
+  return content.trim().length > 0 ? { content, path: inferPreviewSourcePath(content) } : null;
+}
+
+export function readPreviewSourceForCard(
+  designId: string,
+  updatedAt: string,
+): Promise<PreviewCardSource | null> {
+  if (typeof window === 'undefined') return Promise.resolve(null);
+  const key = requestKey(designId, updatedAt);
+  const existing = inflightReads.get(key);
+  if (existing !== undefined) return existing;
+
+  const bridge = window.codesign;
+  if (!bridge) return Promise.resolve(null);
+  const read = resolveDesignPreviewSource({
+    designId,
+    read: bridge.files?.read,
+    listSnapshots: bridge.snapshots.list,
+    preferSnapshotSource: true,
+  }).finally(() => {
+    inflightReads.delete(key);
+  });
+  inflightReads.set(key, read);
+  return read;
+}
+
 export function DesignCardPreview({ design }: DesignCardPreviewProps) {
-  const [html, setHtml] = useState<string | null>(() =>
+  const livePreviewSource = useCodesignStore((s) => s.previewSourceByDesign[design.id]);
+  const isGenerating = useCodesignStore((s) => s.generationByDesign[design.id] !== undefined);
+  const [previewSource, setPreviewSource] = useState<PreviewCardSource | null>(() =>
     readCache(cacheKey(design.id, design.updatedAt)),
   );
   const [failed, setFailed] = useState(false);
@@ -141,6 +222,25 @@ export function DesignCardPreview({ design }: DesignCardPreviewProps) {
       mounted.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    const key = cacheKey(design.id, design.updatedAt);
+    const liveSource =
+      typeof livePreviewSource === 'string' ? previewCardSourceFromRaw(livePreviewSource) : null;
+    if (liveSource !== null) {
+      writeCache(key, liveSource);
+      setPreviewSource(liveSource);
+      setFailed(false);
+      return;
+    }
+    const cached = readCache(key);
+    setPreviewSource((current) => cached ?? current);
+    setFailed(false);
+  }, [design.id, design.updatedAt, livePreviewSource]);
+
+  useEffect(() => {
+    if (isGenerating) setFailed(false);
+  }, [isGenerating]);
 
   // Mount the iframe only after the card has scrolled into (or near) the
   // viewport. Stops every card in the grid from paying the iframe-creation
@@ -163,7 +263,7 @@ export function DesignCardPreview({ design }: DesignCardPreviewProps) {
         }
       },
       // Pre-mount a little above/below the viewport so scrolling feels instant.
-      { rootMargin: '240px 0px' },
+      { root: hubScrollRootForCard(el), rootMargin: '320px 0px' },
     );
     io.observe(el);
     return () => io.disconnect();
@@ -175,17 +275,40 @@ export function DesignCardPreview({ design }: DesignCardPreviewProps) {
   useEffect(() => {
     const el = rootRef.current;
     if (!el || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const w = entry.contentRect.width;
-        const h = entry.contentRect.height;
-        if (w <= 0 || h <= 0) continue;
-        const next = Math.max(w / 1280, h / 960);
-        setScale((prev) => (Math.abs(prev - next) > 0.001 ? next : prev));
+    let scheduled: { kind: 'raf' | 'timeout'; id: number } | null = null;
+    const updateScale = () => {
+      const rect = el.getBoundingClientRect();
+      const w = rect.width;
+      const h = rect.height;
+      if (w <= 0 || h <= 0) return;
+      const next = Math.max(w / 1280, h / 960);
+      setScale((prev) => (Math.abs(prev - next) > 0.001 ? next : prev));
+    };
+    const scheduleScaleUpdate = () => {
+      if (scheduled !== null) return;
+      const flush = () => {
+        scheduled = null;
+        updateScale();
+      };
+      if (typeof window.requestAnimationFrame === 'function') {
+        scheduled = { kind: 'raf', id: window.requestAnimationFrame(flush) };
+      } else {
+        scheduled = { kind: 'timeout', id: window.setTimeout(flush, 0) };
       }
-    });
+    };
+    const cancelScheduledScaleUpdate = () => {
+      if (scheduled === null) return;
+      if (scheduled.kind === 'raf') window.cancelAnimationFrame(scheduled.id);
+      else window.clearTimeout(scheduled.id);
+      scheduled = null;
+    };
+    updateScale();
+    const ro = new ResizeObserver(scheduleScaleUpdate);
     ro.observe(el);
-    return () => ro.disconnect();
+    return () => {
+      ro.disconnect();
+      cancelScheduledScaleUpdate();
+    };
   }, []);
 
   useEffect(() => {
@@ -193,24 +316,22 @@ export function DesignCardPreview({ design }: DesignCardPreviewProps) {
     const key = cacheKey(design.id, design.updatedAt);
     const cached = readCache(key);
     if (cached !== null) {
-      setHtml(cached);
+      setPreviewSource(cached);
       setFailed(false);
       return;
     }
     if (typeof window === 'undefined' || !window.codesign) return;
     let cancelled = false;
-    void window.codesign.snapshots
-      .list(design.id)
-      .then((snaps) => {
+    void readPreviewSourceForCard(design.id, design.updatedAt)
+      .then((result) => {
         if (cancelled || !mounted.current) return;
-        const latest = snaps[0];
-        const source = latest?.artifactSource ?? '';
-        if (source.trim().length === 0) {
-          setFailed(true);
+        if (result === null) {
+          setFailed(!isGenerating);
           return;
         }
-        writeCache(key, source);
-        setHtml(source);
+        writeCache(key, result);
+        setPreviewSource(result);
+        setFailed(false);
       })
       .catch(() => {
         if (!cancelled && mounted.current) setFailed(true);
@@ -218,15 +339,22 @@ export function DesignCardPreview({ design }: DesignCardPreviewProps) {
     return () => {
       cancelled = true;
     };
-  }, [visible, design.id, design.updatedAt]);
+  }, [visible, design.id, design.updatedAt, isGenerating]);
 
-  // JSX artifacts need the React+Babel runtime wrapper; HTML artifacts render directly.
-  const isJsx = useMemo(() => (html ? needsJsxRuntime(html) : false), [html]);
+  // JSX sources need the React+Babel runtime wrapper; HTML documents render directly.
+  const previewSourcePath = previewSource?.path ?? DEFAULT_SOURCE_ENTRY;
+  const isJsx = useMemo(
+    () => (previewSource ? needsJsxRuntime(previewSource.content, previewSourcePath) : false),
+    [previewSource, previewSourcePath],
+  );
   const srcDoc = useMemo(() => {
-    if (!html) return null;
-    const base = isJsx ? buildSrcdoc(html) : html;
+    if (!previewSource) return null;
+    const base = buildPreviewDocument(previewSource.content, {
+      path: previewSourcePath,
+      baseHref: workspaceBaseHrefForPreview(design, previewSourcePath),
+    });
     return injectThumbnailStyle(base);
-  }, [html, isJsx]);
+  }, [design, previewSource, previewSourcePath]);
 
   return (
     <div ref={rootRef} className="absolute inset-0 overflow-hidden bg-white">

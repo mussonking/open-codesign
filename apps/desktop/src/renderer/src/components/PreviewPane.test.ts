@@ -1,9 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
 import { useCodesignStore } from '../store';
 import {
+  computeFitPreviewZoom,
   handlePreviewMessage,
+  isPreviewPaneWelcomeState,
   isTrustedPreviewMessageSource,
   postModeToPreviewWindow,
+  previewArtboardFrameClass,
+  previewArtboardStyle,
+  previewPaneLayoutClasses,
+  previewViewportDimensions,
   scaleRectForZoom,
   stablePreviewSourceKey,
 } from './PreviewPane';
@@ -41,6 +47,82 @@ describe('scaleRectForZoom', () => {
       width: 75,
       height: 75,
     });
+  });
+});
+
+describe('preview artboard frame', () => {
+  it('keeps the preview stage shrinkable inside the workspace shell', () => {
+    const classes = previewPaneLayoutClasses();
+
+    expect(classes.root).toContain('min-w-0');
+    expect(classes.root).toContain('overflow-hidden');
+    expect(classes.stage).toContain('min-w-0');
+    expect(classes.stage).toContain('overflow-hidden');
+    expect(classes.canvasHost).toContain('min-w-0');
+    expect(classes.canvasHost).toContain('overflow-hidden');
+  });
+
+  it('uses fixed viewport dimensions for desktop and tablet frames', () => {
+    expect(previewArtboardStyle('desktop')).toEqual({
+      width: 'var(--size-preview-desktop-width)',
+      height: 'var(--size-preview-desktop-height)',
+    });
+    expect(previewArtboardStyle('tablet')).toEqual({
+      width: 'var(--size-preview-tablet-width)',
+      height: 'var(--size-preview-tablet-height)',
+    });
+  });
+
+  it('renders a visible boundary around framed preview artboards', () => {
+    const className = previewArtboardFrameClass();
+
+    expect(className).toContain('border');
+    expect(className).toContain('shadow-[var(--shadow-elevated)]');
+    expect(className).toContain('overflow-hidden');
+  });
+
+  it('computes fit zoom from the available preview viewport', () => {
+    expect(previewViewportDimensions('desktop')).toEqual({ width: 1440, height: 900 });
+    expect(
+      computeFitPreviewZoom({
+        containerWidth: 1000,
+        containerHeight: 700,
+        viewport: 'desktop',
+      }),
+    ).toBe(66);
+    expect(
+      computeFitPreviewZoom({
+        containerWidth: 3000,
+        containerHeight: 2000,
+        viewport: 'desktop',
+      }),
+    ).toBe(100);
+  });
+});
+
+describe('preview pane welcome state', () => {
+  it('hides chrome only for the empty base files tab', () => {
+    expect(
+      isPreviewPaneWelcomeState({
+        activeTab: { kind: 'files' },
+        tabCount: 1,
+        errorMessage: null,
+        previewSource: null,
+        designHasContent: false,
+      }),
+    ).toBe(true);
+  });
+
+  it('keeps tabs visible for opened file tabs without preview content', () => {
+    expect(
+      isPreviewPaneWelcomeState({
+        activeTab: { kind: 'file', path: 'index.html' },
+        tabCount: 2,
+        errorMessage: null,
+        previewSource: null,
+        designHasContent: false,
+      }),
+    ).toBe(false);
   });
 });
 

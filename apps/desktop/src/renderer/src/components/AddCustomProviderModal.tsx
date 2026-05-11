@@ -1,5 +1,5 @@
 import { useT } from '@open-codesign/i18n';
-import { type WireApi, canonicalBaseUrl, detectWireFromBaseUrl } from '@open-codesign/shared';
+import { canonicalBaseUrl, detectWireFromBaseUrl, type WireApi } from '@open-codesign/shared';
 import { Button } from '@open-codesign/ui';
 import { AlertCircle, Check, CheckCircle, Loader2, X } from 'lucide-react';
 import { useRef, useState } from 'react';
@@ -70,6 +70,24 @@ function pickBestModel(models: string[]): string {
   return models[0] ?? '';
 }
 
+export function buildEndpointDiscoveryPayload(
+  wire: WireApi,
+  baseUrl: string,
+  allowPrivateNetwork: boolean,
+): {
+  wire: WireApi;
+  baseUrl: string;
+  apiKey: string;
+  allowPrivateNetwork: boolean;
+} {
+  return {
+    wire,
+    baseUrl: baseUrl.trim(),
+    apiKey: '',
+    allowPrivateNetwork,
+  };
+}
+
 /**
  * Minimal Custom Provider form — wire-agnostic endpoint onboarding.
  * Deliberately barebones (native form + FormData-ish accessors, no schema),
@@ -100,6 +118,7 @@ export function AddCustomProviderModal({
   const [test, setTest] = useState<TestState>({ kind: 'idle' });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [allowPrivateNetwork, setAllowPrivateNetwork] = useState(false);
 
   const [discovery, setDiscovery] = useState<DiscoveryState>({ kind: 'idle' });
   // When true, user explicitly chose to type a model name instead of picking from the dropdown.
@@ -110,7 +129,11 @@ export function AddCustomProviderModal({
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const discoverySeq = useRef(0);
 
-  function scheduleDiscovery(currentBaseUrl: string, currentWire: WireApi) {
+  function scheduleDiscovery(
+    currentBaseUrl: string,
+    currentWire: WireApi,
+    privateNetworkAllowed = allowPrivateNetwork,
+  ) {
     if (debounceTimer.current !== null) clearTimeout(debounceTimer.current);
     if (!currentBaseUrl.trim().match(/^https?:\/\//)) {
       discoverySeq.current += 1;
@@ -118,20 +141,22 @@ export function AddCustomProviderModal({
       return;
     }
     debounceTimer.current = setTimeout(() => {
-      void runDiscovery(currentBaseUrl, currentWire);
+      void runDiscovery(currentBaseUrl, currentWire, privateNetworkAllowed);
     }, 500);
   }
 
-  async function runDiscovery(currentBaseUrl: string, currentWire: WireApi) {
+  async function runDiscovery(
+    currentBaseUrl: string,
+    currentWire: WireApi,
+    privateNetworkAllowed = allowPrivateNetwork,
+  ) {
     if (!window.codesign?.config) return;
     const seq = ++discoverySeq.current;
     setDiscovery({ kind: 'discovering' });
     try {
-      const res = await window.codesign.config.testEndpoint({
-        wire: currentWire,
-        baseUrl: currentBaseUrl.trim(),
-        apiKey: '',
-      });
+      const res = await window.codesign.config.testEndpoint(
+        buildEndpointDiscoveryPayload(currentWire, currentBaseUrl, privateNetworkAllowed),
+      );
       if (seq !== discoverySeq.current) return;
       if (res.ok && res.models.length > 0) {
         setDiscovery({ kind: 'found', models: res.models });
@@ -183,6 +208,7 @@ export function AddCustomProviderModal({
         wire,
         baseUrl: baseUrl.trim(),
         apiKey: apiKey.trim(),
+        allowPrivateNetwork,
       });
       if (res.ok) setTest({ kind: 'ok', modelCount: res.modelCount });
       else setTest({ kind: 'error', message: res.message });
@@ -336,6 +362,27 @@ export function AddCustomProviderModal({
                 {t('settings.providers.custom.compatibilityHintBody')}
               </p>
             </div>
+          )}
+          {!lockEndpoint && (
+            <label className="mt-2 flex items-start gap-2 rounded-[var(--radius-md)] border border-[var(--color-border-subtle)] px-3 py-2 text-[var(--text-xs)] text-[var(--color-text-secondary)]">
+              <input
+                type="checkbox"
+                checked={allowPrivateNetwork}
+                onChange={(e) => {
+                  const nextAllowPrivateNetwork = e.target.checked;
+                  setAllowPrivateNetwork(nextAllowPrivateNetwork);
+                  setTest({ kind: 'idle' });
+                  scheduleDiscovery(baseUrl, wire, nextAllowPrivateNetwork);
+                }}
+                className="mt-0.5 accent-[var(--color-accent)]"
+              />
+              <span>
+                {t('settings.providers.custom.allowPrivateNetwork', {
+                  defaultValue:
+                    'Allow testing local or private-network provider URLs from this computer',
+                })}
+              </span>
+            </label>
           )}
         </Field>
 

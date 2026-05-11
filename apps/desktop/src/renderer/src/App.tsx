@@ -1,21 +1,30 @@
 import { useT } from '@open-codesign/i18n';
-import { ChevronLeft } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { CommentsPanel } from './components/comment/CommentsPanel';
 import { DeleteDesignDialog } from './components/DeleteDesignDialog';
 import { DesignsView } from './components/DesignsView';
+import { ReportEventDialog } from './components/diagnostics/ReportEventDialog';
+import { ExternalResourcePermissionDialog } from './components/ExternalResourcePermissionDialog';
 import { NewDesignDialog } from './components/NewDesignDialog';
-import { PreviewPane } from './components/PreviewPane';
+import { PermissionDialog } from './components/PermissionDialog';
 import { RebindWorkspaceDialog } from './components/RebindWorkspaceDialog';
 import { RenameDesignDialog } from './components/RenameDesignDialog';
-import { Settings } from './components/Settings';
 import { Sidebar } from './components/Sidebar';
 import { ToastViewport } from './components/Toast';
 import { TopBar } from './components/TopBar';
 import { UpdateBanner } from './components/UpdateBanner';
-import { CommentsPanel } from './components/comment/CommentsPanel';
-import { ReportEventDialog } from './components/diagnostics/ReportEventDialog';
+import { useAgentStream } from './hooks/useAgentStream';
 import { useKeyboard } from './hooks/useKeyboard';
 import { useUpdateWiring } from './hooks/useUpdateWiring';
+
+// Settings opens in a separate view (Hub ↔ Workspace ↔ Settings). Keep it
+// out of the first-paint chunk — its ~2700-line tree + dynamic provider
+// cards add ~16kb gzipped that users rarely need on launch.
+const Settings = lazy(() => import('./components/Settings').then((m) => ({ default: m.Settings })));
+const PreviewPane = lazy(() =>
+  import('./components/PreviewPane').then((m) => ({ default: m.PreviewPane })),
+);
+
 import { createUpdateStore } from './state/update-store';
 import { useCodesignStore } from './store';
 import { HubView } from './views/HubView';
@@ -26,11 +35,8 @@ export function App() {
   const configLoaded = useCodesignStore((s) => s.configLoaded);
   const loadConfig = useCodesignStore((s) => s.loadConfig);
   const loadDesigns = useCodesignStore((s) => s.loadDesigns);
+  const syncGenerationStatus = useCodesignStore((s) => s.syncGenerationStatus);
   const switchDesign = useCodesignStore((s) => s.switchDesign);
-  const sendPrompt = useCodesignStore((s) => s.sendPrompt);
-  const isGenerating = useCodesignStore(
-    (s) => s.isGenerating && s.generatingDesignId === s.currentDesignId,
-  );
   const setView = useCodesignStore((s) => s.setView);
   const view = useCodesignStore((s) => s.view);
   const previousView = useCodesignStore((s) => s.previousView);
@@ -43,11 +49,11 @@ export function App() {
   const requestRenameDesign = useCodesignStore((s) => s.requestRenameDesign);
   const interactionMode = useCodesignStore((s) => s.interactionMode);
   const setInteractionMode = useCodesignStore((s) => s.setInteractionMode);
-  const sidebarCollapsed = useCodesignStore((s) => s.sidebarCollapsed);
+  const _sidebarCollapsed = useCodesignStore((s) => s.sidebarCollapsed);
   const activeReportLocalId = useCodesignStore((s) => s.activeReportLocalId);
   const closeReportDialog = useCodesignStore((s) => s.closeReportDialog);
 
-  const [prompt, setPrompt] = useState('');
+  const [prefillPrompt, setPrefillPrompt] = useState<{ id: number; text: string } | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(() =>
     Math.max(320, Math.round(window.innerWidth * 0.25)),
   );
@@ -55,6 +61,7 @@ export function App() {
 
   const [updateStore] = useState(() => createUpdateStore({ dismissedVersion: '' }));
   useUpdateWiring(updateStore);
+  useAgentStream();
 
   useEffect(() => {
     if (!window.codesign) {
@@ -111,36 +118,25 @@ export function App() {
   useEffect(() => {
     async function bootstrap(): Promise<void> {
       await Promise.all([loadConfig(), loadDesigns()]);
+      await syncGenerationStatus();
       const state = useCodesignStore.getState();
       if (state.currentDesignId === null && state.designs.length > 0) {
-        const first = state.designs[0];
-        if (first) await switchDesign(first.id);
+        const runningDesignId = Object.keys(state.generationByDesign)[0];
+        const initialDesign =
+          state.designs.find((design) => design.id === runningDesignId) ?? state.designs[0];
+        if (initialDesign) await switchDesign(initialDesign.id);
       }
     }
     void bootstrap();
-  }, [loadConfig, loadDesigns, switchDesign]);
+  }, [loadConfig, loadDesigns, switchDesign, syncGenerationStatus]);
 
-  function submit(): void {
-    const trimmed = prompt.trim();
-    if (!trimmed || isGenerating) return;
-    void sendPrompt({ prompt: trimmed });
-    setPrompt('');
-  }
-
-  const ready = configLoaded && config !== null && config.hasKey;
+  const ready = configLoaded && config?.hasKey;
+  const prefillComposer = useCallback((text: string) => {
+    setPrefillPrompt((prev) => ({ id: (prev?.id ?? 0) + 1, text }));
+  }, []);
 
   const bindings = useMemo(
     () => [
-      {
-        combo: 'mod+enter',
-        handler: () => {
-          if (!ready) return;
-          const trimmed = prompt.trim();
-          if (!trimmed || isGenerating) return;
-          void sendPrompt({ prompt: trimmed });
-          setPrompt('');
-        },
-      },
       {
         combo: 'mod+,',
         handler: () => {
@@ -182,10 +178,7 @@ export function App() {
       },
     ],
     [
-      prompt,
-      isGenerating,
       ready,
-      sendPrompt,
       view,
       previousView,
       designsViewOpen,
@@ -211,11 +204,15 @@ export function App() {
   }
 
   return (
-    <div className="h-full flex flex-col bg-[var(--color-background)]">
+    <div className="h-full overflow-hidden flex flex-col bg-[var(--color-background)]">
       <UpdateBanner store={updateStore} />
       <TopBar />
       <div className="flex-1 min-h-0 relative">
-        {view === 'settings' ? <Settings /> : null}
+        {view === 'settings' ? (
+          <Suspense fallback={null}>
+            <Settings />
+          </Suspense>
+        ) : null}
         {hubMounted ? (
           <div hidden={view !== 'hub'} className="h-full">
             <HubView
@@ -228,18 +225,21 @@ export function App() {
                 // doesn't quietly land in the current design's input box.
                 const created = await createNewDesign();
                 if (!created) return;
-                setPrompt(p);
+                prefillComposer(p);
                 setView('workspace');
               }}
             />
           </div>
         ) : null}
         {workspaceMounted ? (
-          <div hidden={view !== 'workspace'} className="h-full flex flex-col">
-            <div className="flex-1 min-h-0 flex relative">
+          <div
+            hidden={view !== 'workspace'}
+            className="h-full min-w-0 overflow-hidden flex flex-col"
+          >
+            <div className="flex-1 min-h-0 min-w-0 overflow-hidden flex relative">
               {isResizing && <div className="absolute inset-0 z-20 cursor-col-resize" />}
               <div className="relative shrink-0" style={{ width: sidebarWidth }}>
-                <Sidebar prompt={prompt} setPrompt={setPrompt} onSubmit={submit} />
+                <Sidebar prefillPrompt={prefillPrompt} />
                 <div
                   role="separator"
                   aria-orientation="vertical"
@@ -249,7 +249,9 @@ export function App() {
                 />
               </div>
               <main className="flex flex-col min-h-0 flex-1 min-w-0">
-                <PreviewPane onPickStarter={(p) => setPrompt(p)} />
+                <Suspense fallback={null}>
+                  <PreviewPane onPickStarter={prefillComposer} />
+                </Suspense>
               </main>
             </div>
           </div>
@@ -262,6 +264,8 @@ export function App() {
       <NewDesignDialog />
       <ToastViewport />
       <CommentsPanel />
+      <PermissionDialog />
+      <ExternalResourcePermissionDialog />
       <ReportEventDialog localId={activeReportLocalId} onClose={closeReportDialog} />
     </div>
   );

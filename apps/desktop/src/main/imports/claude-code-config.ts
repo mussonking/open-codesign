@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { ProviderEntry } from '@open-codesign/shared';
 import { safeReadImportFile } from './safe-read';
 
+// test comment sentinel
 export function claudeCodeSettingsPath(home: string = homedir()): string {
   return join(home, '.claude', 'settings.json');
 }
@@ -95,15 +96,36 @@ function classifyUserType(args: {
  */
 export const PARSE_REASON_NOT_JSON_OBJECT = '__parse_reason_not_json_object__';
 
-export function parseClaudeCodeSettings(
-  json: string,
-  options: ParseClaudeCodeOptions = {},
-): ClaudeCodeImport {
-  const env = options.env ?? process.env;
-  const oauthEvidence = options.oauthEvidence ?? false;
-  const settingsPath = options.settingsPath ?? claudeCodeSettingsPath();
-  const warnings: string[] = [];
+type ParsedSettings =
+  | { kind: 'error'; warning: string }
+  | { kind: 'ok'; settings: ClaudeCodeSettings };
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function validateSettingsShape(parsed: Record<string, unknown>): ParsedSettings {
+  const env = parsed['env'];
+  if (env !== undefined) {
+    if (!isRecord(env)) {
+      return { kind: 'error', warning: 'settings.env must be an object of string values' };
+    }
+    for (const [key, value] of Object.entries(env)) {
+      if (typeof value !== 'string') {
+        return { kind: 'error', warning: `settings.env.${key} must be a string` };
+      }
+    }
+  }
+
+  const apiKeyHelper = parsed['apiKeyHelper'];
+  if (apiKeyHelper !== undefined && typeof apiKeyHelper !== 'string') {
+    return { kind: 'error', warning: 'settings.apiKeyHelper must be a string' };
+  }
+
+  return { kind: 'ok', settings: parsed as ClaudeCodeSettings };
+}
+
+function parseSettingsJson(json: string): ParsedSettings {
   let parsed: unknown;
   try {
     parsed = JSON.parse(json);
@@ -112,52 +134,97 @@ export function parseClaudeCodeSettings(
     // localized prefix, so concatenating a pre-built English preamble here
     // would produce bilingual mojibake in zh locale.
     const msg = err instanceof Error ? err.message : String(err);
-    return {
-      provider: null,
-      apiKey: null,
-      apiKeySource: 'none',
-      userType: 'parse-error',
-      hasOAuthEvidence: oauthEvidence,
-      activeModel: null,
-      settingsPath,
-      warnings: [msg],
-    };
+    return { kind: 'error', warning: msg };
   }
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-    return {
-      provider: null,
-      apiKey: null,
-      apiKeySource: 'none',
-      userType: 'parse-error',
-      hasOAuthEvidence: oauthEvidence,
-      activeModel: null,
-      settingsPath,
-      warnings: [PARSE_REASON_NOT_JSON_OBJECT],
-    };
+  if (!isRecord(parsed)) {
+    return { kind: 'error', warning: PARSE_REASON_NOT_JSON_OBJECT };
   }
+  return validateSettingsShape(parsed);
+}
 
-  const settings = parsed as ClaudeCodeSettings;
-  const settingsEnv = settings.env ?? {};
-  const baseUrl = settingsEnv['ANTHROPIC_BASE_URL'] ?? 'https://api.anthropic.com';
-  const model = settingsEnv['ANTHROPIC_MODEL'] ?? 'claude-sonnet-4-6';
+function buildUnusableImport(
+  userType: ClaudeCodeUserType,
+  oauthEvidence: boolean,
+  settingsPath: string,
+  warnings: string[],
+): ClaudeCodeImport {
+  return {
+    provider: null,
+    apiKey: null,
+    apiKeySource: 'none',
+    userType,
+    hasOAuthEvidence: oauthEvidence,
+    activeModel: null,
+    settingsPath,
+    warnings,
+  };
+}
 
-  // Resolve the API key in priority order: settings.json first (explicit
-  // per-project config), shell env second (user exported globally). Note
-  // that Electron inherits shell env only when launched from a terminal —
-  // GUI launches on macOS will have a sparse process.env.
-  let apiKey: string | null = null;
-  let apiKeySource: 'settings-json' | 'shell-env' | 'none' = 'none';
+// Resolve the API key in priority order: settings.json first (explicit
+// per-project config), shell env second (user exported globally). Note
+// that Electron inherits shell env only when launched from a terminal —
+// GUI launches on macOS will have a sparse process.env.
+function resolveApiKey(
+  settingsEnv: Record<string, string>,
+  shellEnv: NodeJS.ProcessEnv,
+): { apiKey: string | null; apiKeySource: 'settings-json' | 'shell-env' | 'none' } {
   const settingsToken = settingsEnv['ANTHROPIC_AUTH_TOKEN'] ?? settingsEnv['ANTHROPIC_API_KEY'];
   if (typeof settingsToken === 'string' && settingsToken.trim().length > 0) {
-    apiKey = settingsToken.trim();
-    apiKeySource = 'settings-json';
-  } else {
-    const shellToken = env['ANTHROPIC_AUTH_TOKEN'] ?? env['ANTHROPIC_API_KEY'];
-    if (typeof shellToken === 'string' && shellToken.trim().length > 0) {
-      apiKey = shellToken.trim();
-      apiKeySource = 'shell-env';
+    return { apiKey: settingsToken.trim(), apiKeySource: 'settings-json' };
+  }
+  const shellToken = shellEnv['ANTHROPIC_AUTH_TOKEN'] ?? shellEnv['ANTHROPIC_API_KEY'];
+  if (typeof shellToken === 'string' && shellToken.trim().length > 0) {
+    return { apiKey: shellToken.trim(), apiKeySource: 'shell-env' };
+  }
+  return { apiKey: null, apiKeySource: 'none' };
+}
+
+function readOptionalEnvSetting(env: Record<string, string>, key: string): string | undefined {
+  const value = env[key];
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function validateAnthropicBaseUrl(value: string): string | null {
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return `ANTHROPIC_BASE_URL must use http(s), got "${parsed.protocol}"`;
+    }
+    return null;
+  } catch {
+    return `ANTHROPIC_BASE_URL "${value}" is not a valid URL`;
+  }
+}
+
+export function parseClaudeCodeSettings(
+  json: string,
+  options: ParseClaudeCodeOptions = {},
+): ClaudeCodeImport {
+  const env = options.env ?? process.env;
+  const oauthEvidence = options.oauthEvidence ?? false;
+  const settingsPath = options.settingsPath ?? claudeCodeSettingsPath();
+
+  const parsed = parseSettingsJson(json);
+  if (parsed.kind === 'error') {
+    return buildUnusableImport('parse-error', oauthEvidence, settingsPath, [parsed.warning]);
+  }
+
+  const settings = parsed.settings;
+  const settingsEnv = settings.env ?? {};
+  const suppliedBaseUrl = readOptionalEnvSetting(settingsEnv, 'ANTHROPIC_BASE_URL');
+  if (suppliedBaseUrl !== undefined) {
+    const baseUrlError = validateAnthropicBaseUrl(suppliedBaseUrl);
+    if (baseUrlError !== null) {
+      return buildUnusableImport('parse-error', oauthEvidence, settingsPath, [baseUrlError]);
     }
   }
+  const baseUrl = suppliedBaseUrl ?? 'https://api.anthropic.com';
+  const model = readOptionalEnvSetting(settingsEnv, 'ANTHROPIC_MODEL') ?? 'claude-sonnet-4-6';
+
+  const warnings: string[] = [];
+  const { apiKey, apiKeySource } = resolveApiKey(settingsEnv, env);
 
   if (
     apiKey === null &&
@@ -174,31 +241,10 @@ export function parseClaudeCodeSettings(
   // For oauth-only and no-config we deliberately return provider=null:
   // there's no config worth saving, and callers treat provider===null as
   // "nothing to import" so Settings never seeds a zombie entry. parse-error
-  // also returns provider=null via the early-return branches above, with
+  // also returns provider=null via the early-return branch above, with
   // the parse reason in `warnings[0]`.
-  if (userType === 'oauth-only') {
-    return {
-      provider: null,
-      apiKey: null,
-      apiKeySource: 'none',
-      userType,
-      hasOAuthEvidence: oauthEvidence,
-      activeModel: null,
-      settingsPath,
-      warnings,
-    };
-  }
-  if (userType === 'no-config') {
-    return {
-      provider: null,
-      apiKey: null,
-      apiKeySource: 'none',
-      userType,
-      hasOAuthEvidence: oauthEvidence,
-      activeModel: null,
-      settingsPath,
-      warnings,
-    };
+  if (userType === 'oauth-only' || userType === 'no-config') {
+    return buildUnusableImport(userType, oauthEvidence, settingsPath, warnings);
   }
 
   const provider: ProviderEntry = {
@@ -208,10 +254,8 @@ export function parseClaudeCodeSettings(
     wire: 'anthropic',
     baseUrl,
     defaultModel: model,
-    // Always attach the env key hint. Runtime `getApiKeyForProvider` uses
-    // it as a last-resort fallback: if the stored secret gets wiped or the
-    // user exports the token after import, we still resolve it without a
-    // round-trip through onboarding.
+    // Keep the declared env key as import metadata. Runtime credential
+    // resolution requires a persisted secret or an explicit keyless provider.
     envKey: 'ANTHROPIC_AUTH_TOKEN',
     // Claude Code proxies commonly gate reasoning effort by plan — the
     // consumer-tier endpoint accepts only 'medium'. Seed this default so
@@ -274,7 +318,7 @@ export async function readClaudeCodeSettings(
     // settings.json absent or rejected by size/type guard. If OAuth evidence
     // is present, synthesize a minimal ClaudeCodeImport so the Settings
     // banner still offers the subscription-user guidance — otherwise
-    // return null and stay silent.
+    // return null without showing a detection banner.
     if (!oauthEvidence) return null;
     return {
       provider: null,

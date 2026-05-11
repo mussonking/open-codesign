@@ -4,14 +4,35 @@ import { enExamples } from './locales/en';
 import { zhCNExamples } from './locales/zh-CN';
 
 describe('examples gallery', () => {
-  it('ships at least 6 curated examples', () => {
-    expect(EXAMPLES.length).toBeGreaterThanOrEqual(6);
-    expect(EXAMPLES.length).toBeLessThanOrEqual(30);
+  it('ships the expanded curated example library', () => {
+    expect(EXAMPLES.length).toBe(84);
   });
 
   it('every example has a unique id', () => {
     const ids = EXAMPLES.map((e) => e.id);
     expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('covers scaffold, skill, and brand-reference stress scenarios', () => {
+    const ids = new Set(EXAMPLES.map((e) => e.id));
+    for (const id of [
+      'watch-run-coach',
+      'foldable-travel-planner',
+      'vision-pro-spatial-gallery',
+      'safari-product-tour',
+      'terminal-release-monitor',
+      'vscode-extension-marketplace',
+      'drawer-inspector',
+      'toast-notification-center',
+      'skeleton-loading-dashboard',
+      'empty-state-library',
+      'cjk-editorial-longform',
+      'stripe-brand-checkout',
+      'linear-roadmap',
+      'raycast-launcher',
+    ]) {
+      expect(ids.has(id), `missing coverage scenario: ${id}`).toBe(true);
+    }
   });
 
   it('every example has a non-trivial prompt and inline SVG thumbnail', () => {
@@ -34,6 +55,15 @@ describe('examples gallery', () => {
     }
   });
 
+  it('every zh-CN example has a localized prompt override', () => {
+    for (const ex of EXAMPLES) {
+      const zh = zhCNExamples[ex.id];
+      expect(zh?.prompt, `missing zh-CN prompt for ${ex.id}`).toBeDefined();
+      expect(zh?.prompt?.length).toBeGreaterThan(40);
+      expect(zh?.prompt).not.toBe(ex.prompt);
+    }
+  });
+
   it('getExamples returns localized content', () => {
     const en = getExamples('en');
     const zh = getExamples('zh-CN');
@@ -43,8 +73,17 @@ describe('examples gallery', () => {
     const cosmicZh = zh.find((e) => e.id === 'cosmic-animation');
     expect(cosmicEn?.title).toBe('Cosmic scale animation');
     expect(cosmicZh?.title).toBe('宇宙尺度动画');
-    // Prompt is locale-independent — same canonical English source.
-    expect(cosmicEn?.prompt).toBe(cosmicZh?.prompt);
+    expect(cosmicEn?.prompt).toContain('Outer Frame');
+    expect(cosmicZh?.prompt).toContain('航天科技公司');
+    expect(cosmicZh?.prompt).not.toBe(cosmicEn?.prompt);
+  });
+
+  it('locales without prompt coverage fall back to the English source prompt', () => {
+    const es = getExamples('es');
+    const launchEs = es.find((e) => e.id === 'product-launch-page');
+    const launchEn = getExample('product-launch-page', 'en');
+    expect(launchEs?.title).toBe(launchEn?.title);
+    expect(launchEs?.prompt).toBe(launchEn?.prompt);
   });
 
   it('getExamples falls back to en for unknown locales', () => {

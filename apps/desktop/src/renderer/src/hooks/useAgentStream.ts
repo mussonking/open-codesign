@@ -12,9 +12,12 @@
  * marks any still-pending row as 'done' so the WorkingCard never sticks.
  */
 
+import { DEFAULT_SOURCE_ENTRY, LEGACY_SOURCE_ENTRY } from '@open-codesign/shared';
 import { useEffect, useRef } from 'react';
 import type { AgentStreamEvent } from '../../../preload/index';
+import { resolveReferencedWorkspacePreviewPath } from '../preview/workspace-source';
 import { useCodesignStore } from '../store';
+import { createAgentFsUpdateScheduler } from './agent-stream-fs-scheduler';
 
 interface PendingPersist {
   /** Resolves to the persisted row's seq, or null if the append failed. */
@@ -44,74 +47,64 @@ interface InFlightTurn {
 export function useAgentStream(): void {
   const appendChatMessage = useCodesignStore((s) => s.appendChatMessage);
   const setStreamingAssistantText = useCodesignStore((s) => s.setStreamingAssistantText);
-  const setPreviewHtmlFromAgent = useCodesignStore((s) => s.setPreviewHtmlFromAgent);
+  const setPreviewSourceFromAgent = useCodesignStore((s) => s.setPreviewSourceFromAgent);
   const updateChatToolStatus = useCodesignStore((s) => s.updateChatToolStatus);
   const persistAgentRunSnapshot = useCodesignStore((s) => s.persistAgentRunSnapshot);
-  const inFlight = useRef<InFlightTurn | null>(null);
+  const renameDesign = useCodesignStore((s) => s.renameDesign);
+  const markGenerationRunning = useCodesignStore((s) => s.markGenerationRunning);
+  const inFlight = useRef<Map<string, InFlightTurn>>(new Map());
 
-  // Throttled live-preview push. iframe srcdoc reloads the whole page on every
-  // change, so a flurry of str_replace events (10+ per turn is normal) would
-  // strobe. Coalesce to ~250ms with a guaranteed trailing edge so the final
-  // state always lands.
-  const fsThrottle = useRef<{
-    timer: ReturnType<typeof setTimeout> | null;
-    pending: { designId: string; content: string } | null;
-    lastFlushAt: number;
-  }>({ timer: null, pending: null, lastFlushAt: 0 });
   const FS_THROTTLE_MS = 250;
 
   useEffect(() => {
     if (typeof window === 'undefined' || !window.codesign) return;
-    const flushFs = () => {
-      const slot = fsThrottle.current;
-      slot.timer = null;
-      const pending = slot.pending;
-      slot.pending = null;
-      if (!pending) return;
-      slot.lastFlushAt = Date.now();
-      setPreviewHtmlFromAgent(pending);
-    };
-    const scheduleFs = (next: { designId: string; content: string }) => {
-      const slot = fsThrottle.current;
-      slot.pending = next;
-      const since = Date.now() - slot.lastFlushAt;
-      if (since >= FS_THROTTLE_MS && slot.timer === null) {
-        // Cold path: flush immediately, then a future event will land within
-        // the throttle window and be coalesced.
-        flushFs();
-        return;
-      }
-      if (slot.timer !== null) return;
-      slot.timer = setTimeout(flushFs, Math.max(FS_THROTTLE_MS - since, 0));
+    const fsScheduler = createAgentFsUpdateScheduler({
+      delayMs: FS_THROTTLE_MS,
+      setTimer: (callback, delayMs) => setTimeout(callback, delayMs),
+      clearTimer: (timer) => clearTimeout(timer),
+      flush(update) {
+        setPreviewSourceFromAgent({
+          designId: update.designId,
+          content: update.content,
+        });
+      },
+    });
+
+    const scheduleFs = (next: {
+      designId: string;
+      generationId: string;
+      path: string;
+      content: string;
+    }) => {
+      fsScheduler.schedule(next);
     };
 
     const handleTurnStart = (event: AgentStreamEvent) => {
+      markGenerationRunning(event.designId, event.generationId, 'thinking');
       // TODO: replace with rendererLogger once renderer-logger lands
       console.debug('[agent] turn_start', {
         generationId: event.generationId,
         designId: event.designId,
       });
-      const previous = inFlight.current;
-      const sameRun =
-        previous &&
-        previous.designId === event.designId &&
-        previous.generationId === event.generationId;
-      inFlight.current = {
+      const previous = inFlight.current.get(event.generationId);
+      inFlight.current.set(event.generationId, {
         designId: event.designId,
         generationId: event.generationId,
         textBuffer: '',
-        lastPersistedText: sameRun ? previous.lastPersistedText : null,
-        pendingTools: sameRun ? previous.pendingTools : [],
-      };
+        lastPersistedText: previous?.lastPersistedText ?? null,
+        pendingTools: previous?.pendingTools ?? [],
+      });
       setStreamingAssistantText({ designId: event.designId, text: '' });
     };
 
     const handleTextDelta = (event: AgentStreamEvent) => {
-      if (!inFlight.current || typeof event.delta !== 'string') return;
-      inFlight.current.textBuffer += event.delta;
+      markGenerationRunning(event.designId, event.generationId, 'streaming');
+      const current = inFlight.current.get(event.generationId);
+      if (!current || typeof event.delta !== 'string') return;
+      current.textBuffer += event.delta;
       setStreamingAssistantText({
-        designId: inFlight.current.designId,
-        text: inFlight.current.textBuffer,
+        designId: current.designId,
+        text: current.textBuffer,
       });
     };
 
@@ -129,7 +122,8 @@ export function useAgentStream(): void {
     };
 
     const handleTurnEnd = (event: AgentStreamEvent) => {
-      const current = inFlight.current;
+      markGenerationRunning(event.designId, event.generationId, 'thinking');
+      const current = inFlight.current.get(event.generationId);
       // TODO: replace with rendererLogger once renderer-logger lands
       console.debug('[agent] turn_end', {
         generationId: event.generationId,
@@ -147,21 +141,41 @@ export function useAgentStream(): void {
         current.lastPersistedText = finalText;
       }
       if (current) drainPendingTools(current, 'done');
-      setStreamingAssistantText(null);
+      setStreamingAssistantText({ designId: event.designId, text: '' });
       if (current) current.textBuffer = '';
     };
 
     const handleToolCallStart = (event: AgentStreamEvent) => {
-      const current = inFlight.current;
+      const current = inFlight.current.get(event.generationId);
       const designId = event.designId;
       const toolName = event.toolName ?? 'unknown';
+      const initialStatus =
+        event.status === 'done' || event.status === 'error' ? event.status : 'running';
+      if (initialStatus === 'running') {
+        markGenerationRunning(event.designId, event.generationId, 'streaming');
+      }
       // TODO: replace with rendererLogger once renderer-logger lands
       console.debug('[agent] tool_call_start', {
         generationId: event.generationId,
         designId,
         toolName,
         toolCallId: event.toolCallId,
+        status: initialStatus,
       });
+      // set_title updates design metadata only. Moving the workspace folder
+      // here can race with file reads/writes from the active generation.
+      if (toolName === 'set_title') {
+        const rawTitle = (event.args as { title?: unknown } | undefined)?.title;
+        if (typeof rawTitle === 'string' && rawTitle.trim().length > 0) {
+          const cleaned = rawTitle
+            .trim()
+            .replace(/[\s.,;:!?—–-]+$/u, '')
+            .slice(0, 60);
+          if (cleaned.length > 0) {
+            void renameDesign(designId, cleaned, { renameWorkspace: false });
+          }
+        }
+      }
       // DB row rather than an in-memory shadow. Capture seq via promise so
       // the result handler can patch the same row even if it lands before
       // the append round-trip completes.
@@ -172,13 +186,18 @@ export function useAgentStream(): void {
           toolName,
           ...(event.command !== undefined ? { command: event.command } : {}),
           args: event.args ?? {},
-          status: 'running',
+          status: initialStatus,
           startedAt: new Date().toISOString(),
           verbGroup: event.verbGroup ?? 'Working',
           ...(event.toolCallId !== undefined ? { toolCallId: event.toolCallId } : {}),
+          ...(event.result !== undefined ? { result: event.result } : {}),
+          ...(event.durationMs !== undefined ? { durationMs: event.durationMs } : {}),
+          ...(initialStatus === 'error' && typeof event.message === 'string'
+            ? { error: { message: event.message } }
+            : {}),
         },
       }).then((row) => row?.seq ?? null);
-      if (current) {
+      if (current && initialStatus === 'running') {
         current.pendingTools.push({
           seqPromise,
           toolName,
@@ -189,7 +208,8 @@ export function useAgentStream(): void {
     };
 
     const handleToolCallResult = (event: AgentStreamEvent) => {
-      const current = inFlight.current;
+      markGenerationRunning(event.designId, event.generationId, 'streaming');
+      const current = inFlight.current.get(event.generationId);
       const designId = event.designId;
       if (!current) return;
       const idx = current.pendingTools.findIndex(
@@ -205,29 +225,59 @@ export function useAgentStream(): void {
       pending.resolved = true;
       const result = event.result;
       const durationMs = event.durationMs;
+      const finalStatus = event.status === 'error' ? 'error' : 'done';
       void pending.seqPromise.then((seq) => {
         if (seq === null) return;
         void updateChatToolStatus({
           designId,
           seq,
-          status: 'done',
+          status: finalStatus,
           ...(result !== undefined ? { result } : {}),
           ...(durationMs !== undefined ? { durationMs } : {}),
+          ...(finalStatus === 'error' && typeof event.message === 'string'
+            ? { errorMessage: event.message }
+            : {}),
         });
       });
     };
 
     const handleFsUpdated = (event: AgentStreamEvent) => {
-      // Live mirror of the agent's text_editor mutations into the iframe.
-      // We only react to index.html — other paths (frames/, skills/) are
-      // read-only context and never become the rendered artifact.
-      if (event.path === 'index.html' && typeof event.content === 'string') {
-        scheduleFs({ designId: event.designId, content: event.content });
+      markGenerationRunning(event.designId, event.generationId, 'streaming');
+      // Live mirror of the agent edit tool's mutations into the iframe.
+      // App.jsx is the default source file. Legacy workspaces may still use
+      // index.html directly or as a small placeholder pointing at JSX/TSX.
+      if (typeof event.path !== 'string' || typeof event.content !== 'string') return;
+      if (event.path === DEFAULT_SOURCE_ENTRY || event.path === LEGACY_SOURCE_ENTRY) {
+        scheduleFs({
+          designId: event.designId,
+          generationId: event.generationId,
+          path: event.path,
+          content: event.content,
+        });
+        return;
+      }
+      const state = useCodesignStore.getState();
+      const visible = state.currentDesignId === event.designId;
+      const currentSource = visible
+        ? state.previewSource
+        : state.previewSourceByDesign[event.designId];
+      if (!currentSource) return;
+      const referencedPath = resolveReferencedWorkspacePreviewPath(
+        currentSource,
+        LEGACY_SOURCE_ENTRY,
+      );
+      if (referencedPath === event.path) {
+        scheduleFs({
+          designId: event.designId,
+          generationId: event.generationId,
+          path: event.path,
+          content: event.content,
+        });
       }
     };
 
     const handleError = (event: AgentStreamEvent) => {
-      const current = inFlight.current;
+      const current = inFlight.current.get(event.generationId);
       // TODO: replace with rendererLogger once renderer-logger lands
       console.error('[agent] error', {
         generationId: event.generationId,
@@ -235,8 +285,9 @@ export function useAgentStream(): void {
         message: event.message,
         code: event.code,
       });
-      setStreamingAssistantText(null);
-      inFlight.current = null;
+      if (current) drainPendingTools(current, 'error');
+      setStreamingAssistantText({ designId: event.designId, text: '' });
+      inFlight.current.delete(event.generationId);
       void appendChatMessage({
         designId: event.designId,
         kind: 'error',
@@ -249,47 +300,55 @@ export function useAgentStream(): void {
       // "running" if the IPC promise that drives sendPrompt hangs. Only clear
       // when the error belongs to the design the store thinks is generating.
       const s = useCodesignStore.getState();
-      if (s.generatingDesignId === event.designId) {
+      const currentRun = s.generationByDesign[event.designId];
+      if (currentRun?.generationId === event.generationId) {
+        const generationByDesign = { ...s.generationByDesign };
+        delete generationByDesign[event.designId];
+        const activeForCurrent =
+          s.currentDesignId === null ? undefined : generationByDesign[s.currentDesignId];
         useCodesignStore.setState({
-          isGenerating: false,
-          generatingDesignId: null,
-          generationStage: 'error',
-          streamingAssistantText: null,
+          generationByDesign,
+          isGenerating: activeForCurrent !== undefined,
+          activeGenerationId: activeForCurrent?.generationId ?? null,
+          generatingDesignId: activeForCurrent !== undefined ? s.currentDesignId : null,
+          generationStage:
+            activeForCurrent?.stage ??
+            (s.currentDesignId === event.designId ? 'error' : s.generationStage),
         });
       }
     };
 
     const handleAgentEnd = (event: AgentStreamEvent) => {
-      // Flush any throttled fs_updated payload synchronously so the preview
-      // store reflects the final html before we read it back for persistence.
-      const slot = fsThrottle.current;
-      if (slot.timer !== null) {
-        clearTimeout(slot.timer);
-        slot.timer = null;
-      }
-      const pending = slot.pending;
-      slot.pending = null;
-      if (pending) {
-        slot.lastFlushAt = Date.now();
-        setPreviewHtmlFromAgent(pending);
-      }
-      const finalText = inFlight.current?.lastPersistedText ?? undefined;
+      // Flush only this generation's pending preview updates before persisting
+      // the final snapshot so concurrent background runs stay isolated.
+      fsScheduler.flushGeneration(event.generationId);
+      const current = inFlight.current.get(event.generationId);
+      const finalText = current?.lastPersistedText ?? undefined;
       void persistAgentRunSnapshot({
         designId: event.designId,
         ...(finalText ? { finalText } : {}),
       });
-      inFlight.current = null;
+      inFlight.current.delete(event.generationId);
+      setStreamingAssistantText({ designId: event.designId, text: '' });
       // Defensive: clear generation flags. The sendPrompt Promise resolution
       // would normally clear them shortly after, but if the main-process IPC
       // hangs for any reason the UI would be stuck in "running" forever.
       // Mirror the happy-path terminal state here as a belt-and-suspenders.
       const s = useCodesignStore.getState();
-      if (s.generatingDesignId === event.designId) {
+      const currentRun = s.generationByDesign[event.designId];
+      if (currentRun?.generationId === event.generationId) {
+        const generationByDesign = { ...s.generationByDesign };
+        delete generationByDesign[event.designId];
+        const activeForCurrent =
+          s.currentDesignId === null ? undefined : generationByDesign[s.currentDesignId];
         useCodesignStore.setState({
-          isGenerating: false,
-          generatingDesignId: null,
-          generationStage: 'done',
-          streamingAssistantText: null,
+          generationByDesign,
+          isGenerating: activeForCurrent !== undefined,
+          activeGenerationId: activeForCurrent?.generationId ?? null,
+          generatingDesignId: activeForCurrent !== undefined ? s.currentDesignId : null,
+          generationStage:
+            activeForCurrent?.stage ??
+            (s.currentDesignId === event.designId ? 'done' : s.generationStage),
         });
       }
       // Fire the auto-polish follow-up exactly once per design. Delay so the
@@ -341,18 +400,15 @@ export function useAgentStream(): void {
     });
     return () => {
       off();
-      const slot = fsThrottle.current;
-      if (slot.timer !== null) {
-        clearTimeout(slot.timer);
-        slot.timer = null;
-      }
-      slot.pending = null;
+      fsScheduler.clearAll();
     };
   }, [
     appendChatMessage,
     setStreamingAssistantText,
-    setPreviewHtmlFromAgent,
+    setPreviewSourceFromAgent,
     updateChatToolStatus,
     persistAgentRunSnapshot,
+    renameDesign,
+    markGenerationRunning,
   ]);
 }

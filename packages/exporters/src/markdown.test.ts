@@ -1,7 +1,55 @@
-import { describe, expect, it } from 'vitest';
-import { htmlToMarkdown, sanitizeUrl } from './markdown';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { exportMarkdown, htmlToMarkdown, sanitizeUrl } from './markdown';
+
+const launchMock = vi.fn();
+const newPageMock = vi.fn();
+const setViewportMock = vi.fn();
+const setContentMock = vi.fn();
+const evaluateMock = vi.fn();
+const closeMock = vi.fn();
+
+vi.mock('puppeteer-core', () => ({
+  default: { launch: launchMock },
+}));
+
+vi.mock('./chrome-discovery', () => ({
+  findSystemChrome: vi.fn(async () => '/tmp/fake-chrome'),
+}));
 
 const META = { title: 'Demo', schemaVersion: 1 as const };
+let tempDir = '';
+
+beforeAll(() => {
+  tempDir = mkdtempSync(join(tmpdir(), 'codesign-markdown-test-'));
+});
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  launchMock.mockResolvedValue({
+    newPage: newPageMock,
+    close: closeMock,
+  });
+  newPageMock.mockResolvedValue({
+    setViewport: setViewportMock,
+    setContent: setContentMock,
+    evaluate: evaluateMock,
+  });
+  evaluateMock.mockImplementation(async (source: unknown) => {
+    if (typeof source === 'string') {
+      return source.includes('document.body')
+        ? '<main><h1>Rendered JSX</h1><p>Actual DOM text</p></main>'
+        : undefined;
+    }
+    return '<main><h1>Rendered JSX</h1><p>Actual DOM text</p></main>';
+  });
+});
+
+afterAll(() => {
+  rmSync(tempDir, { recursive: true, force: true });
+});
 
 describe('htmlToMarkdown', () => {
   it('writes a YAML frontmatter with title and schemaVersion', () => {
@@ -42,6 +90,26 @@ describe('htmlToMarkdown', () => {
     expect(ol).toContain('2. y');
   });
 
+  it('converts tables without flattening rows into paragraphs', () => {
+    const out = htmlToMarkdown(
+      '<table><tr><th>Name</th><th>Score</th></tr><tr><td>Ada</td><td>10</td></tr></table>',
+      META,
+    );
+
+    expect(out).toContain('| Name | Score |');
+    expect(out).toContain('| --- | --- |');
+    expect(out).toContain('| Ada | 10 |');
+  });
+
+  it('escapes table cell pipes and backslashes', () => {
+    const out = htmlToMarkdown(
+      '<table><tr><th>Path</th></tr><tr><td>C:\\temp|draft</td></tr></table>',
+      META,
+    );
+
+    expect(out).toContain('| C:\\\\temp\\|draft |');
+  });
+
   it('converts strong/em/code/pre', () => {
     const out = htmlToMarkdown(
       '<p><strong>bold</strong> and <em>italic</em> with <code>x</code></p><pre>line1\nline2</pre>',
@@ -66,6 +134,12 @@ describe('htmlToMarkdown', () => {
   it('decodes entities', () => {
     const out = htmlToMarkdown('<p>A &amp; B &lt; C</p>', META);
     expect(out).toContain('A & B < C');
+  });
+
+  it('decodes common named entities without treating literal comparisons as tags', () => {
+    const out = htmlToMarkdown('<p>2 < 3 &amp;&amp; Tom&apos;s ratio&colon; 5 > 4</p>', META);
+
+    expect(out).toContain("2 < 3 && Tom's ratio: 5 > 4");
   });
 
   it('handles empty input gracefully', () => {
@@ -198,5 +272,26 @@ describe('sanitizeUrl encoded-scheme bypass guard', () => {
 
   it('keeps URLs with stray literal % that would break decodeURIComponent', () => {
     expect(sanitizeUrl('https://x.test/?q=100%', 'link')).toBe('https://x.test/?q=100%');
+  });
+});
+
+describe('exportMarkdown', () => {
+  it('exports Markdown from the rendered DOM for JSX sources', async () => {
+    const dest = join(tempDir, 'rendered.md');
+
+    await exportMarkdown(
+      'function App() { return <main><h1>Source JSX</h1></main>; }\nReactDOM.createRoot(document.getElementById("root")).render(<App/>);',
+      dest,
+      { sourcePath: 'App.jsx' },
+    );
+
+    const out = readFileSync(dest, 'utf8');
+    expect(setContentMock).toHaveBeenCalledWith(
+      expect.stringContaining('CODESIGN_STANDALONE_RUNTIME'),
+      expect.objectContaining({ waitUntil: 'load' }),
+    );
+    expect(out).toContain('# Rendered JSX');
+    expect(out).toContain('Actual DOM text');
+    expect(out).not.toContain('Source JSX');
   });
 });

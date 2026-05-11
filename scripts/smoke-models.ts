@@ -1,8 +1,9 @@
 #!/usr/bin/env tsx
 /**
  * smoke-models.ts — batch-test (provider, model, prompt) combos through the
- * exact same `generate()` code path the desktop app uses. Saves each artifact
- * to /tmp/smoke/, runs lightweight quality checks, prints a colored report.
+ * agentic `generateViaAgent()` code path the desktop app uses. Saves each
+ * artifact to /tmp/smoke/, runs lightweight quality checks, prints a colored
+ * report.
  *
  * Usage:
  *   pnpm smoke
@@ -15,11 +16,22 @@
  *   OPENROUTER_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, GOOGLE_API_KEY,
  *   GROQ_API_KEY, CEREBRAS_API_KEY, XAI_API_KEY, MISTRAL_API_KEY.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { isAbsolute, relative, resolve } from 'node:path';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import * as TOML from '@iarna/toml';
-import { generate } from '@open-codesign/core';
+import { generateViaAgent, type TextEditorFsCallbacks } from '@open-codesign/core';
+import { transformHtmlElementBlocks } from '@open-codesign/shared/html-utils';
 import { Parser } from 'acorn';
 
 interface SmokeModel {
@@ -87,7 +99,7 @@ function slug(model: SmokeModel, prompt: SmokePrompt): string {
 function qualityCheck(html: string): string[] {
   const issues: string[] = [];
 
-  const mainCount = (html.match(/<main[\s>]/gi) ?? []).length;
+  const mainCount = countStartTags(html, 'main');
   if (mainCount > 1) issues.push(`${mainCount}x <main> elements`);
 
   // Emoji used as content icons (anti-slop). Heuristic: emoji codepoint sitting
@@ -102,23 +114,38 @@ function qualityCheck(html: string): string[] {
   // distinguish module from script (Babel handles JSX in the artifact at
   // runtime) — just check it's lexically clean enough that tools like esbuild
   // wouldn't choke.
-  const scripts = [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)];
-  for (const m of scripts) {
-    const body = m[1]?.trim();
-    if (!body) continue;
+  let scriptSyntaxFailed = false;
+  transformHtmlElementBlocks(html, 'script', ({ body, tag }) => {
+    if (scriptSyntaxFailed) return tag;
+    const trimmed = body.trim();
+    if (!trimmed) return tag;
     try {
-      Parser.parse(body, { ecmaVersion: 'latest', sourceType: 'script' });
+      Parser.parse(trimmed, { ecmaVersion: 'latest', sourceType: 'script' });
     } catch (err) {
       issues.push(`script syntax error: ${(err as Error).message.split('\n')[0]}`);
-      break;
+      scriptSyntaxFailed = true;
     }
-  }
+    return tag;
+  });
 
-  if (!/TWEAK_DEFAULTS\s*=\s*\/\*EDITMODE-BEGIN\*\//.test(html)) {
+  if (!html.includes('TWEAK_DEFAULTS') || !html.includes('/*EDITMODE-BEGIN*/')) {
     issues.push('no EDITMODE block');
   }
 
   return issues;
+}
+
+function countStartTags(html: string, tagName: string): number {
+  const lower = html.toLowerCase();
+  const needle = `<${tagName.toLowerCase()}`;
+  let count = 0;
+  let index = lower.indexOf(needle);
+  while (index >= 0) {
+    const next = lower[index + needle.length] ?? '';
+    if (next === '>' || next.trim().length === 0) count += 1;
+    index = lower.indexOf(needle, index + needle.length);
+  }
+  return count;
 }
 
 function printResult(r: RunResult): void {
@@ -136,22 +163,85 @@ function printResult(r: RunResult): void {
   }
 }
 
+function makeTmpdirFs(root: string): TextEditorFsCallbacks {
+  const resolvePath = (rel: string): string => {
+    const abs = resolve(root, rel);
+    const relCheck = relative(root, abs);
+    if (relCheck.startsWith('..') || isAbsolute(relCheck)) {
+      throw new Error(`Path escapes workspace: ${rel}`);
+    }
+    return abs;
+  };
+  return {
+    view(path) {
+      const abs = resolvePath(path);
+      if (!existsSync(abs)) return null;
+      const stat = statSync(abs);
+      if (!stat.isFile()) return null;
+      const content = readFileSync(abs, 'utf8');
+      return { content, numLines: content.split('\n').length };
+    },
+    create(path, content) {
+      const abs = resolvePath(path);
+      mkdirSync(dirname(abs), { recursive: true });
+      writeFileSync(abs, content);
+      return { path };
+    },
+    strReplace(path, oldStr, newStr) {
+      const abs = resolvePath(path);
+      const current = readFileSync(abs, 'utf8');
+      const idx = current.indexOf(oldStr);
+      if (idx === -1) throw new Error(`old_str not found in ${path}`);
+      if (current.indexOf(oldStr, idx + 1) !== -1) {
+        throw new Error(`old_str matches multiple locations in ${path}`);
+      }
+      writeFileSync(abs, current.slice(0, idx) + newStr + current.slice(idx + oldStr.length));
+      return { path };
+    },
+    insert(path, line, text) {
+      const abs = resolvePath(path);
+      const current = existsSync(abs) ? readFileSync(abs, 'utf8') : '';
+      const lines = current.split('\n');
+      const at = Math.max(0, Math.min(line, lines.length));
+      lines.splice(at, 0, text);
+      writeFileSync(abs, lines.join('\n'));
+      return { path };
+    },
+    listDir(dir) {
+      const abs = resolvePath(dir);
+      if (!existsSync(abs) || !statSync(abs).isDirectory()) return [];
+      return readdirSync(abs).sort();
+    },
+  };
+}
+
 async function runOne(model: SmokeModel, prompt: SmokePrompt, apiKey: string): Promise<RunResult> {
   const t0 = Date.now();
+  const workspaceRoot = mkdtempSync(join(tmpdir(), 'codesign-smoke-'));
   try {
-    const result = await generate({
-      prompt: prompt.text,
-      history: [],
-      model: { provider: model.provider as never, modelId: model.modelId },
-      apiKey,
-      onRetry: (info) => {
-        console.log(`  ${COLOR.dim}↻ retry: ${info.reason}${COLOR.reset}`);
+    const fs = makeTmpdirFs(workspaceRoot);
+    const result = await generateViaAgent(
+      {
+        prompt: prompt.text,
+        history: [],
+        model: { provider: model.provider as never, modelId: model.modelId },
+        apiKey,
+        onRetry: (info) => {
+          console.log(`  ${COLOR.dim}↻ retry: ${info.reason}${COLOR.reset}`);
+        },
       },
-    });
+      {
+        fs,
+        // Stub the runtime verifier so `done` skips the BrowserWindow check.
+        // We're outside Electron — running it would crash. Static lint still
+        // fires inside `done` itself.
+        runtimeVerify: async () => [],
+      },
+    );
     const ms = Date.now() - t0;
     const artifact = result.artifacts[0];
     if (!artifact?.content?.trim()) {
-      throw new Error('No HTML artifact returned from generate()');
+      throw new Error('No HTML artifact returned from generateViaAgent()');
     }
     const html = artifact.content;
     const artifactPath = resolve(SMOKE_DIR, `${slug(model, prompt)}.html`);
@@ -181,6 +271,12 @@ async function runOne(model: SmokeModel, prompt: SmokePrompt, apiKey: string): P
       issues: [],
       error: err instanceof Error ? err.message : String(err),
     };
+  } finally {
+    try {
+      rmSync(workspaceRoot, { recursive: true, force: true });
+    } catch {
+      // Best-effort cleanup; tmpdir reaper handles leftovers.
+    }
   }
 }
 

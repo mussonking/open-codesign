@@ -2,9 +2,12 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev/v0.2]
   pull_request:
-    branches: [main]
+    branches: [main, dev/v0.2]
+
+permissions:
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -17,19 +20,37 @@ jobs:
     name: Lint, typecheck, test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version-file: .nvmrc
           cache: pnpm
 
       - name: Install
-        run: pnpm install --frozen-lockfile
+        run: env -u ELECTRON_SKIP_BINARY_DOWNLOAD -u ELECTRON_SKIP_DOWNLOAD pnpm install --frozen-lockfile --ignore-scripts=false
+
+      - name: Install Electron binary
+        run: |
+          env -u ELECTRON_SKIP_BINARY_DOWNLOAD -u ELECTRON_SKIP_DOWNLOAD pnpm -C apps/desktop exec node -e "
+          const { execFileSync } = require('node:child_process');
+          const path = require('node:path');
+          const electronDir = path.dirname(require.resolve('electron/package.json'));
+          execFileSync(process.execPath, [path.join(electronDir, 'install.js')], { stdio: 'inherit' });
+          "
+
+      - name: Verify Electron binary
+        run: |
+          env -u ELECTRON_SKIP_BINARY_DOWNLOAD -u ELECTRON_SKIP_DOWNLOAD pnpm -C apps/desktop exec node -e "
+          const fs = require('node:fs');
+          const electronPath = require('electron');
+          fs.accessSync(electronPath, fs.constants.X_OK);
+          console.log(electronPath);
+          "
 
       - name: Lint
         run: pnpm lint

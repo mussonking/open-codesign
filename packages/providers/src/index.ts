@@ -11,7 +11,7 @@ import {
   CodesignError,
   ERROR_CODES,
   type ModelRef,
-  type ProviderCapabilities,
+  type ReasoningLevel as SharedReasoningLevel,
   type WireApi,
 } from '@open-codesign/shared';
 import {
@@ -20,26 +20,21 @@ import {
   shouldForceClaudeCodeIdentity,
 } from './claude-code-compat';
 import { normalizeGeminiModelId } from './gemini-compat';
-import {
-  applyResponsesRoleShaping,
-  inferReasoning,
-  requiresResponsesRoleShaping,
-} from './wire-policy';
 
 /** Subset of pi-ai's `ThinkingLevel` we expose. Maps directly to its `reasoning`
  * field, which Anthropic adapters translate to extended-thinking effort/budget
  * (and OpenAI/Gemini adapters translate to their respective reasoning knobs).
  *
- * Only the named effort levels pi-ai actually understands. Sending this to a
- * non-reasoning model is a silent fallback, so callers must whitelist
- * known-capable models before passing a value (see `reasoningForModel`). */
-export type ReasoningLevel = 'low' | 'medium' | 'high' | 'xhigh';
+ * `off` is an Open CoDesign config/UI override and is intentionally omitted
+ * before calling pi-ai. */
+export type ReasoningLevel = SharedReasoningLevel;
+type PiReasoningLevel = Exclude<ReasoningLevel, 'off'>;
 
 export interface GenerateOptions {
   apiKey: string;
   baseUrl?: string;
   signal?: AbortSignal;
-  /** Hard cap on output tokens. When omitted, pi-ai falls back to ~1/3 of
+  /** Hard cap on output tokens. When omitted, pi-ai uses roughly 1/3 of
    *  the model's context window. */
   maxTokens?: number;
   /** When set, asks the provider to "think before answering". On Anthropic
@@ -61,16 +56,6 @@ export interface GenerateOptions {
    * placeholder while auth is supplied by `httpHeaders` or by the gateway.
    */
   allowKeyless?: boolean;
-  /**
-   * Explicit capability profile for the provider. When set, overrides
-   * heuristic inference (e.g. reasoning support, role compatibility).
-   */
-  capabilities?: ProviderCapabilities;
-  /**
-   * Raw capability overrides explicitly stored on the provider entry.
-   * Preserves the distinction between "explicit false" and resolved defaults.
-   */
-  explicitCapabilities?: ProviderCapabilities;
 }
 
 export interface GenerateResult {
@@ -136,6 +121,13 @@ interface PiModel {
   name?: string;
   baseUrl?: string;
   reasoning?: boolean;
+  compat?: {
+    supportsDeveloperRole?: boolean;
+    supportsReasoningEffort?: boolean;
+    supportsStore?: boolean;
+    supportsStrictMode?: boolean;
+    maxTokensField?: 'max_completion_tokens' | 'max_tokens';
+  };
   input?: string[];
   cost?: { input: number; output: number; cacheRead: number; cacheWrite: number };
   contextWindow?: number;
@@ -187,7 +179,123 @@ const EMPTY_USAGE: PiUsage = {
 
 const MAX_TOTAL_CODEX_IMAGE_BYTES = 4_000_000;
 
-export { inferReasoning } from './wire-policy';
+/**
+ * `reasoning: true` on a synthesized PiModel makes pi-ai's openai-responses /
+ * openai-chat adapters write the system prompt with role `'developer'`
+ * instead of `'system'`. That's OpenAI-Responses-only; every OpenAI-compat
+ * gateway out there (DashScope/Qwen, DeepSeek, GLM/BigModel, Moonshot, …)
+ * rejects `developer` with HTTP 400. So only claim reasoning when we
+ * actually know the target accepts it. (#183)
+ */
+function isOpenAIOfficial(baseUrl: string | undefined): boolean {
+  if (!baseUrl) return false;
+  return /^https:\/\/api\.openai\.com(\/|$)/.test(baseUrl);
+}
+
+function isReasoningModelId(modelId: string): boolean {
+  // OpenAI reasoning families: o1, o3, o4, gpt-5 (incl. variants like gpt-5-turbo, gpt-5.4)
+  return /^(o[134]|gpt-5)/i.test(modelId);
+}
+
+/**
+ * Some vendors use OpenAI-compatible chat endpoints but reject the
+ * reasoning/developer-role path. Check these before the broad reasoning
+ * allowlist below so namespaced catalog IDs do not accidentally opt in.
+ */
+const OPENAI_CHAT_NON_REASONING_MODEL_PATTERN = new RegExp(
+  ['(^|/)kimi[-/]', '(^|/)moonshot[-/]', '(^|/)minimax[-/]'].join('|'),
+  'i',
+);
+
+function isKnownOpenAIChatNonReasoningModelId(modelId: string): boolean {
+  return OPENAI_CHAT_NON_REASONING_MODEL_PATTERN.test(modelId);
+}
+
+/**
+ * Matches reasoning-capable model IDs commonly proxied through OpenAI-compatible
+ * gateways (OpenRouter, univibe, sub2api, etc). This pattern matches the same
+ * set that OPENROUTER_REASONING_MODEL_RE uses for OpenRouter, but applies to
+ * custom openai-chat wire endpoints as well.
+ */
+const REASONING_MODEL_ID_PATTERN = new RegExp(
+  [
+    ':thinking$',
+    '(^|/)claude-(?:opus|sonnet)-4',
+    '^(?:openai/)?(?:o1|o3|o4|gpt-5)(?:[-.].*)?$',
+    '^deepseek/deepseek-r\\d',
+    '^qwen/qwq',
+  ].join('|'),
+  'i',
+);
+
+export function inferReasoning(
+  wire: GenerateOptions['wire'],
+  modelId: string,
+  baseUrl: string | undefined,
+): boolean {
+  switch (wire) {
+    case 'anthropic':
+      return true;
+    case 'openai-responses':
+    case 'openai-codex-responses':
+      return true;
+    case 'openai-chat':
+      if (isKnownOpenAIChatNonReasoningModelId(modelId)) {
+        return false;
+      }
+      // For official OpenAI, check both base URL and model ID pattern
+      if (isOpenAIOfficial(baseUrl)) {
+        return isReasoningModelId(modelId);
+      }
+      // For third-party OpenAI-compatible gateways, heuristically match
+      // common reasoning model IDs — many gateways still require the
+      // reasoning flag to get extended thinking output.
+      return REASONING_MODEL_ID_PATTERN.test(modelId);
+    default:
+      return false;
+  }
+}
+
+function supportsOpenAIDeveloperRole(
+  wire: GenerateOptions['wire'],
+  baseUrl: string | undefined,
+): boolean {
+  if (wire !== 'openai-chat' || baseUrl === undefined) return true;
+  const host = (() => {
+    try {
+      return new URL(baseUrl).hostname.toLowerCase();
+    } catch {
+      return '';
+    }
+  })();
+  return host === 'api.openai.com' || host.endsWith('.openai.com') || host === 'openrouter.ai';
+}
+
+function openAIChatCompatForBaseUrl(
+  wire: GenerateOptions['wire'],
+  baseUrl: string | undefined,
+): PiModel['compat'] | undefined {
+  if (wire !== 'openai-chat' || baseUrl === undefined) return undefined;
+  let host = '';
+  try {
+    host = new URL(baseUrl).hostname.toLowerCase();
+  } catch {
+    return { supportsDeveloperRole: false };
+  }
+  if (host === 'api.deepinfra.com' || host.endsWith('.deepinfra.com')) {
+    return {
+      supportsDeveloperRole: false,
+      supportsReasoningEffort: false,
+      supportsStore: false,
+      supportsStrictMode: false,
+      maxTokensField: 'max_tokens',
+    };
+  }
+  if (!supportsOpenAIDeveloperRole(wire, baseUrl)) {
+    return { supportsDeveloperRole: false };
+  }
+  return undefined;
+}
 
 /**
  * Synthesize a PiModel for a wire + custom baseUrl so custom provider ids
@@ -199,7 +307,6 @@ function synthesizeWireModel(
   modelId: string,
   wire: GenerateOptions['wire'],
   baseUrl: string | undefined,
-  capabilities?: ProviderCapabilities,
 ): PiModel {
   const supportsImageInput = wire === 'openai-codex-responses';
   const api =
@@ -215,13 +322,15 @@ function synthesizeWireModel(
     name: modelId,
     api,
     provider,
-    reasoning: inferReasoning(wire, modelId, baseUrl, capabilities, provider),
+    reasoning: inferReasoning(wire, modelId, baseUrl),
     input: supportsImageInput ? ['text', 'image'] : ['text'],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: 131072,
     maxTokens: 131072,
   };
   if (baseUrl !== undefined) base.baseUrl = baseUrl;
+  const compat = openAIChatCompatForBaseUrl(wire, baseUrl);
+  if (compat !== undefined) base.compat = compat;
   return base;
 }
 
@@ -236,10 +345,11 @@ export async function complete(
   messages: ChatMessage[],
   opts: GenerateOptions,
 ): Promise<GenerateResult> {
-  if (!opts.apiKey && opts.allowKeyless !== true) {
+  const trimmedApiKey = opts.apiKey.trim();
+  if (trimmedApiKey.length === 0 && opts.allowKeyless !== true) {
     throw new CodesignError('Missing API key', ERROR_CODES.PROVIDER_AUTH_MISSING);
   }
-  const apiKey = opts.apiKey || 'open-codesign-keyless';
+  const apiKey = trimmedApiKey.length > 0 ? trimmedApiKey : 'open-codesign-keyless';
 
   // Gemini's OpenAI-compat endpoint rejects the `models/` prefix that its own
   // /models listing returns (issue #175). Normalize on the wire only; Settings
@@ -256,7 +366,7 @@ export async function complete(
         baseUrl?: string;
         signal?: AbortSignal;
         maxTokens?: number;
-        reasoning?: ReasoningLevel;
+        reasoning?: PiReasoningLevel;
         headers?: Record<string, string>;
         onPayload?: (payload: unknown) => unknown;
       },
@@ -264,28 +374,9 @@ export async function complete(
   };
 
   let piModel = pi.getModel(model.provider, effectiveModelId);
-  if (piModel && opts.wire !== undefined) {
-    const effectiveBaseUrl = opts.baseUrl ?? piModel.baseUrl;
-    piModel = {
-      ...piModel,
-      reasoning: inferReasoning(
-        opts.wire,
-        effectiveModelId,
-        effectiveBaseUrl,
-        opts.explicitCapabilities ?? opts.capabilities,
-        model.provider,
-      ),
-    };
-  }
   if (!piModel) {
     if (opts.wire !== undefined) {
-      piModel = synthesizeWireModel(
-        model.provider,
-        effectiveModelId,
-        opts.wire,
-        opts.baseUrl,
-        opts.explicitCapabilities ?? opts.capabilities,
-      );
+      piModel = synthesizeWireModel(model.provider, effectiveModelId, opts.wire, opts.baseUrl);
     } else if (model.provider === 'openrouter') {
       piModel = synthesizeOpenRouterModel(effectiveModelId);
     } else {
@@ -303,7 +394,7 @@ export async function complete(
     baseUrl?: string;
     signal?: AbortSignal;
     maxTokens?: number;
-    reasoning?: ReasoningLevel;
+    reasoning?: PiReasoningLevel;
     headers?: Record<string, string>;
     onPayload?: (payload: unknown) => unknown;
   } = {
@@ -312,17 +403,29 @@ export async function complete(
   if (opts.baseUrl !== undefined) piOpts.baseUrl = opts.baseUrl;
   if (opts.signal !== undefined) piOpts.signal = opts.signal;
   if (opts.maxTokens !== undefined) piOpts.maxTokens = opts.maxTokens;
-  if (opts.reasoning !== undefined) piOpts.reasoning = opts.reasoning;
+  if (opts.reasoning !== undefined && opts.reasoning !== 'off') piOpts.reasoning = opts.reasoning;
   if (opts.httpHeaders !== undefined) piOpts.headers = { ...opts.httpHeaders };
 
-  // Covers both registry-looked-up models (piModel.api) and custom-endpoint
-  // models where the wire is passed explicitly via opts.wire.
-  if (
-    (requiresResponsesRoleShaping(opts.wire) || piModel.api === 'openai-responses') &&
-    piContext.systemPrompt
-  ) {
+  // Strict OpenAI-Responses gateways (e.g. sub2api-style routers) 400 when
+  // they see BOTH a system/developer item in `input[]` AND no top-level
+  // `instructions`. pi-ai's plain `openai-responses` wire injects the former
+  // but not the latter, so we mirror the codex wire's strict behavior here:
+  // set `instructions` and strip system/developer entries from `input[]`.
+  if (piModel.api === 'openai-responses' && piContext.systemPrompt) {
     const systemPrompt = piContext.systemPrompt;
-    piOpts.onPayload = (payload) => applyResponsesRoleShaping(payload, systemPrompt);
+    piOpts.onPayload = (payload) => {
+      const params = payload as {
+        instructions?: string;
+        input?: Array<{ role?: string }>;
+      };
+      params.instructions = systemPrompt;
+      if (Array.isArray(params.input)) {
+        params.input = params.input.filter(
+          (entry) => entry.role !== 'system' && entry.role !== 'developer',
+        );
+      }
+      return params;
+    };
   }
 
   // sub2api / claude2api gateways 403 requests without claude-cli identity
@@ -330,22 +433,17 @@ export async function complete(
   // sub2api-issued key and you hit the plain API-key branch. Force the
   // identity headers for custom anthropic endpoints so the WAF admits us.
   // User-supplied httpHeaders keep precedence.
-  const requiresIdentity =
-    opts.capabilities?.requiresClaudeCodeIdentity ??
-    shouldForceClaudeCodeIdentity(opts.wire, opts.baseUrl);
-  if (requiresIdentity && !looksLikeClaudeOAuthToken(apiKey)) {
+  if (
+    shouldForceClaudeCodeIdentity(opts.wire, opts.baseUrl) &&
+    !looksLikeClaudeOAuthToken(apiKey)
+  ) {
     piOpts.headers = { ...claudeCodeIdentityHeaders(), ...(piOpts.headers ?? {}) };
   }
 
   validateCodexImageInputs(opts);
   const result = await pi.completeSimple(piModel, piContext, piOpts);
 
-  if (result.stopReason === 'error') {
-    throw new CodesignError(
-      result.errorMessage ?? 'Provider returned an error',
-      ERROR_CODES.PROVIDER_ERROR,
-    );
-  }
+  assertCompleteStop(result);
 
   const text = result.content
     .filter((c) => c.type === 'text' && typeof c.text === 'string')
@@ -358,6 +456,23 @@ export async function complete(
     outputTokens: result.usage?.output ?? 0,
     costUsd: result.usage?.cost?.total ?? 0,
   };
+}
+
+function assertCompleteStop(result: PiAssistantMessage): void {
+  if (result.stopReason === 'stop') return;
+  if (result.stopReason === 'aborted') {
+    throw new CodesignError(
+      result.errorMessage ?? 'Generation aborted by provider',
+      ERROR_CODES.PROVIDER_ABORTED,
+    );
+  }
+  const message =
+    result.stopReason === 'length'
+      ? 'Provider stopped before completion because the response hit the token limit'
+      : result.stopReason === 'toolUse'
+        ? 'Provider returned an unresolved tool call in a non-tool completion'
+        : (result.errorMessage ?? 'Provider returned an error');
+  throw new CodesignError(message, ERROR_CODES.PROVIDER_ERROR);
 }
 
 function validateCodexImageInputs(opts: GenerateOptions): void {
@@ -458,9 +573,6 @@ export function detectProviderFromKey(key: string): ModelRef['provider'] | null 
   return null;
 }
 
-export { pingProvider } from './validate';
-export type { ValidateResult } from './validate';
-
 export {
   claudeCodeIdentityHeaders,
   isOfficialAnthropicBaseUrl,
@@ -468,20 +580,8 @@ export {
   shouldForceClaudeCodeIdentity,
   withClaudeCodeIdentity,
 } from './claude-code-compat';
-
-export { completeWithRetry, classifyError, sleepWithAbort, withBackoff } from './retry';
-export type {
-  BackoffOptions,
-  CompleteWithRetryOptions,
-  RetryDecision,
-  RetryReason,
-} from './retry';
-
 export { looksLikeGatewayMissingMessagesApi } from './gateway-compat';
-
-export { injectSkillsIntoMessages, formatSkillsForPrompt, filterActive } from './skill-injector';
-
-export { defaultImageBaseUrl, defaultImageModel, generateImage } from './images';
+export { isGeminiOpenAICompat, normalizeGeminiModelId } from './gemini-compat';
 export type {
   GenerateImageOptions,
   GenerateImageResult,
@@ -491,10 +591,29 @@ export type {
   ImageQuality,
   ImageSize,
 } from './images';
+export { defaultImageBaseUrl, defaultImageModel, generateImage } from './images';
+export type {
+  BackoffOptions,
+  CompleteWithRetryOptions,
+  RetryDecision,
+  RetryReason,
+} from './retry';
+export {
+  classifyError,
+  completeWithRetry,
+  isProviderAbortedTransportError,
+  isTransportLevelError,
+  sleepWithAbort,
+  withBackoff,
+} from './retry';
+
+export { filterActive } from './skill-injector';
+export type { ValidateResult } from './validate';
+export { pingProvider } from './validate';
 
 // Tier 2 surface (not yet implemented):
 //   structuredComplete<T>(model, schema, messages, opts): Promise<T>
 //   streamArtifacts(model, messages, opts): AsyncIterable<ArtifactEvent>
-//   streamWithFallback(models[], messages, opts)
+//   streamWithAlternates(models[], messages, opts)
 //   completeWithRetry(model, messages, opts, { maxRetries, baseDelayMs })
 //   completeWithPdf(pdfBase64, prompt, opts)

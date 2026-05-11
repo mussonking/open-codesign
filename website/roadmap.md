@@ -31,9 +31,9 @@ Reliability and provider-access release.
 - CLIProxyAPI auto-detect and one-click import
 - Clearer diagnostics for third-party relay timeouts, SSE truncation, missing `/models`, and incompatible Messages APIs
 
-## v0.2 — Agentic Design (next)
+## v0.2 — Agentic Design (Shipped May 2026)
 
-Expected in about one week. v0.2 changes the core loop from one-shot prompt-to-artifact generation into a local design agent with real files.
+v0.2 changes the core loop from one-shot prompt-to-artifact generation into a local design agent with real files.
 
 - Every design is a pi session with JSONL history and a workspace folder
 - The agent uses pi built-ins for read, write, edit, bash, grep, find, and ls, gated by Open CoDesign's permission UI

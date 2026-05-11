@@ -183,102 +183,118 @@ export function DiagnosticsPanel() {
   }
 
   return (
-    <div className="space-y-5">
-      <div>
-        <h3 className="text-[var(--text-sm)] font-semibold text-[var(--color-text-primary)]">
-          {t('settings.diagnostics.title')}
-        </h3>
-        <p className="text-[var(--text-xs)] text-[var(--color-text-muted)] mt-1 leading-[var(--leading-body)]">
-          {t('settings.diagnostics.description')}
-        </p>
+    <div className="flex min-h-0 flex-1 flex-col gap-4">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--color-border-subtle)] pb-4">
+        <div className="min-w-[14rem] max-w-[38rem]">
+          <h3 className="text-[var(--text-sm)] font-semibold text-[var(--color-text-primary)]">
+            {t('settings.diagnostics.title')}
+          </h3>
+          <p className="text-[var(--text-xs)] text-[var(--color-text-muted)] mt-1 leading-[var(--leading-body)]">
+            {t('settings.diagnostics.description')}
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void onOpenLogFolder()}
+            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-[var(--radius-md)] border border-[var(--color-border)] text-[var(--text-sm)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] transition-colors"
+          >
+            <FolderOpen className="w-3.5 h-3.5" />
+            {t('settings.diagnostics.openLogFolder')}
+          </button>
+          <button
+            type="button"
+            disabled={exporting}
+            onClick={() => void onExport()}
+            className="inline-flex items-center gap-1.5 h-8 px-3 rounded-[var(--radius-md)] border border-[var(--color-border)] text-[var(--text-sm)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Download className="w-3.5 h-3.5" />
+            {t('settings.diagnostics.exportBundle')}
+          </button>
+        </div>
       </div>
 
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          onClick={() => void onOpenLogFolder()}
-          className="inline-flex items-center gap-1.5 h-8 px-3 rounded-[var(--radius-md)] border border-[var(--color-border)] text-[var(--text-sm)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] transition-colors"
-        >
-          <FolderOpen className="w-3.5 h-3.5" />
-          {t('settings.diagnostics.openLogFolder')}
-        </button>
-        <button
-          type="button"
-          disabled={exporting}
-          onClick={() => void onExport()}
-          className="inline-flex items-center gap-1.5 h-8 px-3 rounded-[var(--radius-md)] border border-[var(--color-border)] text-[var(--text-sm)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          <Download className="w-3.5 h-3.5" />
-          {t('settings.diagnostics.exportBundle')}
-        </button>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <label className="flex items-center gap-2 text-[var(--text-sm)] text-[var(--color-text-secondary)]">
+          <input
+            type="checkbox"
+            checked={includeTransient}
+            onChange={(e) => setIncludeTransient(e.target.checked)}
+            className="h-3.5 w-3.5"
+          />
+          {t('settings.diagnostics.showTransient')}
+        </label>
+
+        {!dbAvailable && rows.length > 0 ? (
+          <p className="text-[var(--text-xs)] text-[var(--color-text-muted)] bg-[var(--color-surface)] border border-[var(--color-border-subtle)] rounded-[var(--radius-md)] px-2 py-1.5">
+            {t('settings.diagnostics.inMemoryFallback')}
+          </p>
+        ) : null}
       </div>
-
-      <label className="flex items-center gap-2 text-[var(--text-sm)] text-[var(--color-text-secondary)]">
-        <input
-          type="checkbox"
-          checked={includeTransient}
-          onChange={(e) => setIncludeTransient(e.target.checked)}
-          className="h-3.5 w-3.5"
-        />
-        {t('settings.diagnostics.showTransient')}
-      </label>
-
-      {!dbAvailable && rows.length > 0 ? (
-        <p className="text-[var(--text-xs)] text-[var(--color-text-muted)] bg-[var(--color-surface)] border border-[var(--color-border-subtle)] rounded-[var(--radius-md)] px-2 py-1.5">
-          {t('settings.diagnostics.inMemoryFallback')}
-        </p>
-      ) : null}
 
       {rows.length === 0 ? (
-        <div className="flex flex-col items-center justify-center gap-2 py-10 text-[var(--text-sm)] text-[var(--color-text-muted)]">
+        <div className="flex min-h-[18rem] flex-col items-center justify-center gap-2 py-10 text-[var(--text-sm)] text-[var(--color-text-muted)]">
           <AlertCircle className="w-5 h-5" />
           {dbAvailable ? t('settings.diagnostics.empty') : t('settings.diagnostics.dbUnavailable')}
         </div>
       ) : (
-        <table className="w-full text-[var(--text-sm)] border-t border-[var(--color-border-subtle)]">
-          <thead>
-            <tr className="text-left text-[var(--text-xs)] text-[var(--color-text-muted)]">
-              <th className="py-2 pr-3 font-medium">{t('settings.diagnostics.column.time')}</th>
-              <th className="py-2 pr-3 font-medium">{t('settings.diagnostics.column.code')}</th>
-              <th className="py-2 pr-3 font-medium">{t('settings.diagnostics.column.scope')}</th>
-              <th className="py-2 pr-3 font-medium">{t('settings.diagnostics.column.runId')}</th>
-              <th className="py-2 pr-3 font-medium">{t('settings.diagnostics.column.message')}</th>
-              <th className="py-2 font-medium" />
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((event) => (
-              <tr
-                key={`${event.id}-${event.fingerprint}-${event.ts}`}
-                className="border-t border-[var(--color-border-subtle)] align-top text-[var(--color-text-secondary)]"
-              >
-                <td
-                  className="py-2 pr-3 whitespace-nowrap"
-                  title={new Date(event.ts).toISOString()}
-                >
-                  {formatRelativeTime(event.ts, Date.now(), locale)}
-                </td>
-                <td className="py-2 pr-3 font-mono text-[var(--text-xs)]">{event.code}</td>
-                <td className="py-2 pr-3">{event.scope}</td>
-                <td className="py-2 pr-3 font-mono text-[var(--text-xs)]">
-                  {formatRunIdPreview(event.runId)}
-                </td>
-                <td className="py-2 pr-3 text-[var(--color-text-primary)]">
-                  {truncateMessage(event.message)}
-                </td>
-                <td className="py-2">
-                  <button
-                    type="button"
-                    onClick={() => onReport(event)}
-                    className="inline-flex items-center h-7 px-2 rounded-[var(--radius-sm)] border border-[var(--color-border)] text-[var(--text-xs)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] transition-colors"
+        <div className="min-h-[18rem] flex-1 overflow-hidden rounded-[var(--radius-md)] border border-[var(--color-border-subtle)]">
+          <div className="codesign-scroll-area h-full max-h-[min(34rem,calc(100vh-16rem))] overflow-auto">
+            <table className="w-full min-w-[42rem] text-[var(--text-sm)]">
+              <thead className="sticky top-0 z-10 bg-[var(--color-background)]">
+                <tr className="text-left text-[var(--text-xs)] text-[var(--color-text-muted)]">
+                  <th className="py-2 pl-3 pr-3 font-medium">
+                    {t('settings.diagnostics.column.time')}
+                  </th>
+                  <th className="py-2 pr-3 font-medium">{t('settings.diagnostics.column.code')}</th>
+                  <th className="py-2 pr-3 font-medium">
+                    {t('settings.diagnostics.column.scope')}
+                  </th>
+                  <th className="py-2 pr-3 font-medium">
+                    {t('settings.diagnostics.column.runId')}
+                  </th>
+                  <th className="py-2 pr-3 font-medium">
+                    {t('settings.diagnostics.column.message')}
+                  </th>
+                  <th className="py-2 pr-3 font-medium" />
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((event) => (
+                  <tr
+                    key={`${event.id}-${event.fingerprint}-${event.ts}`}
+                    className="border-t border-[var(--color-border-subtle)] align-top text-[var(--color-text-secondary)]"
                   >
-                    {t('settings.diagnostics.report')}
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                    <td
+                      className="py-2 pl-3 pr-3 whitespace-nowrap"
+                      title={new Date(event.ts).toISOString()}
+                    >
+                      {formatRelativeTime(event.ts, Date.now(), locale)}
+                    </td>
+                    <td className="py-2 pr-3 font-mono text-[var(--text-xs)]">{event.code}</td>
+                    <td className="py-2 pr-3">{event.scope}</td>
+                    <td className="py-2 pr-3 font-mono text-[var(--text-xs)]">
+                      {formatRunIdPreview(event.runId)}
+                    </td>
+                    <td className="py-2 pr-3 text-[var(--color-text-primary)]">
+                      {truncateMessage(event.message)}
+                    </td>
+                    <td className="py-2 pr-3">
+                      <button
+                        type="button"
+                        onClick={() => onReport(event)}
+                        className="inline-flex items-center h-7 px-2 rounded-[var(--radius-sm)] border border-[var(--color-border)] text-[var(--text-xs)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-hover)] transition-colors"
+                      >
+                        {t('settings.diagnostics.report')}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
       )}
     </div>
   );
