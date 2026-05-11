@@ -19,6 +19,7 @@ import { create } from 'zustand';
 import type {
   CodesignApi,
   ExportFormat,
+  RenameDesignOptions,
   WorkspaceImportBlobInput,
   WorkspaceImportFileInput,
   WorkspaceImportResult,
@@ -322,9 +323,10 @@ export interface CodesignState {
   openNewDesignDialog: () => void;
   closeNewDesignDialog: () => void;
   createNewDesign: (workspacePath?: string | null) => Promise<Design | null>;
+  createNewConversationForCurrentWorkspace: () => Promise<Design | null>;
   switchDesign: (id: string) => Promise<void>;
   renameCurrentDesign: (name: string) => Promise<void>;
-  renameDesign: (id: string, name: string) => Promise<void>;
+  renameDesign: (id: string, name: string, options?: RenameDesignOptions) => Promise<void>;
   duplicateDesign: (id: string) => Promise<Design | null>;
   softDeleteDesign: (id: string) => Promise<void>;
   openDesignsView: () => void;

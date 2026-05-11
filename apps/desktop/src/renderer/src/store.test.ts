@@ -369,13 +369,17 @@ describe('useCodesignStore generation cancellation', () => {
     });
 
     await vi.waitFor(() =>
-      expect(renameDesign).toHaveBeenCalledWith(designId, '设计 Apple Watch 跑步教练屏幕'),
+      expect(renameDesign).toHaveBeenCalledWith(designId, '设计 Apple Watch 跑步教练屏幕', {
+        renameWorkspace: false,
+      }),
     );
     expect(generateTitle).toHaveBeenCalledOnce();
 
     titleTask.resolve('Apple Watch 跑步教练');
     await vi.waitFor(() =>
-      expect(renameDesign).toHaveBeenCalledWith(designId, 'Apple Watch 跑步教练'),
+      expect(renameDesign).toHaveBeenCalledWith(designId, 'Apple Watch 跑步教练', {
+        renameWorkspace: false,
+      }),
     );
 
     generateTask.resolve({ artifacts: [{ content: '<html></html>' }], message: 'Done.' });
@@ -1009,6 +1013,58 @@ describe('useCodesignStore design management', () => {
     expect(updateWorkspace).not.toHaveBeenCalled();
   });
 
+  it('creates a fresh conversation for the current workspace with clean UI state', async () => {
+    const existing = { ...DEFAULT_DESIGN, id: 'design-a', workspacePath: '/tmp/shared' };
+    const created = {
+      ...DEFAULT_DESIGN,
+      id: 'design-b',
+      name: 'Untitled design 1',
+      workspacePath: '/tmp/shared',
+    };
+    const createDesign = vi.fn(() => Promise.resolve(created));
+
+    vi.stubGlobal('window', {
+      codesign: {
+        chat: mockChatApi(),
+        comments: mockCommentsApi(),
+        snapshots: {
+          createDesign,
+          listDesigns: vi.fn(() => Promise.resolve([existing, created])),
+          list: vi.fn(() => Promise.resolve([])),
+        },
+      },
+      setTimeout,
+    });
+
+    useCodesignStore.setState({
+      designs: [existing],
+      currentDesignId: existing.id,
+      previewSource: '<main>old</main>',
+      chatMessages: [
+        {
+          schemaVersion: 1 as const,
+          id: 1,
+          designId: existing.id,
+          seq: 0,
+          kind: 'user',
+          payload: { text: 'old context' },
+          snapshotId: null,
+          createdAt: '2024-01-01T00:00:00.000Z',
+        },
+      ],
+    });
+
+    const result = await useCodesignStore.getState().createNewConversationForCurrentWorkspace();
+
+    expect(result?.id).toBe('design-b');
+    expect(createDesign).toHaveBeenCalledWith('Untitled design 1', '/tmp/shared', {
+      workspaceReuse: 'fresh-conversation',
+    });
+    expect(useCodesignStore.getState().currentDesignId).toBe('design-b');
+    expect(useCodesignStore.getState().previewSource).toBeNull();
+    expect(useCodesignStore.getState().chatMessages).toEqual([]);
+  });
+
   it('imports picked files into the workspace and attaches imported paths to the prompt', async () => {
     const imported = [
       {
@@ -1221,6 +1277,40 @@ describe('useCodesignStore design management', () => {
       '<html>first</html>',
     );
     expect(useCodesignStore.getState().generationByDesign).toEqual({});
+  });
+
+  it('blocks generation when another session is already running for the same workspace', async () => {
+    const designA = { ...DEFAULT_DESIGN, id: 'design-a', workspacePath: '/tmp/shared' };
+    const designB = { ...DEFAULT_DESIGN, id: 'design-b', workspacePath: '/tmp/shared/' };
+    const generate = vi.fn(async () => ({
+      artifacts: [{ content: '<html>blocked</html>' }],
+      message: 'should not run',
+    }));
+
+    vi.stubGlobal('window', {
+      codesign: {
+        generate,
+        chat: mockChatApi(),
+        comments: mockCommentsApi(),
+        snapshots: mockSnapshotsApi(),
+      },
+      setTimeout,
+    });
+
+    useCodesignStore.setState({
+      designs: [designA, designB],
+      currentDesignId: 'design-b',
+      generationByDesign: {
+        'design-a': { generationId: 'gen-design-a', stage: 'streaming' },
+      },
+    });
+
+    await useCodesignStore.getState().sendPrompt({ prompt: 'same workspace prompt' });
+
+    expect(generate).not.toHaveBeenCalled();
+    expect(useCodesignStore.getState().toasts[0]?.title).toBe(
+      'A generation is already running for this workspace',
+    );
   });
 
   it('refreshes the current design when selecting it again from the hub', async () => {

@@ -14,6 +14,9 @@ export function DesignSwitcher() {
   const currentDesignId = useCodesignStore((s) => s.currentDesignId);
   const switchDesign = useCodesignStore((s) => s.switchDesign);
   const openNewDesignDialog = useCodesignStore((s) => s.openNewDesignDialog);
+  const createNewConversationForCurrentWorkspace = useCodesignStore(
+    (s) => s.createNewConversationForCurrentWorkspace,
+  );
   const openDesignsView = useCodesignStore((s) => s.openDesignsView);
   const requestRenameDesign = useCodesignStore((s) => s.requestRenameDesign);
 
@@ -110,6 +113,16 @@ export function DesignSwitcher() {
           </ul>
 
           <div className="border-t border-[var(--color-border-muted)] py-1">
+            {current?.workspacePath ? (
+              <MenuRow
+                icon={<Plus className="w-3.5 h-3.5" />}
+                label={t('projects.switcher.newConversationForWorkspace')}
+                onClick={() => {
+                  setOpen(false);
+                  void createNewConversationForCurrentWorkspace();
+                }}
+              />
+            ) : null}
             <MenuRow
               icon={<Plus className="w-3.5 h-3.5" />}
               label={t('projects.switcher.newDesign')}
